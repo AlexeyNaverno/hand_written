@@ -5,7 +5,7 @@
 import * as cv from '../cv';
 import { RGBA, clamp } from '../types';
 import { propagateLabels } from '../imgops';
-import { PageAnalysis, TextLine, darkness, inkMask } from './page';
+import { PageAnalysis, TextLine, darkness, eraseRuling, inkMask } from './page';
 
 export interface LineStrip {
   lineId: number;
@@ -104,6 +104,8 @@ export function extractStrip(img: RGBA, page: PageAnalysis, line: TextLine): Lin
   }
   const xh = xh0 * S;
   const dark = darkness(gray, width, height, Math.round(Math.max(15, 1.5 * xh)) | 1);
+  // notebook ruling (lines and squares) is erased before the ink mask is built; solid strokes crossing it stay
+  eraseRuling(dark, width, height, 0.24 * page.inkLevel, 0.5 * page.inkLevel, Math.round(2.5 * xh), height);
   const mask = inkMask(dark, width, height, page.inkLevel);
   const ink = mask.ink;
 

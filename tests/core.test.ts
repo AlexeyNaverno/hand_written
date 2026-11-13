@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { alignText } from '../src/core/analyze/align';
 import { analyzePage } from '../src/core/analyze/page';
+import { extractStrip } from '../src/core/analyze/strip';
 import type { Boundary, Primitive } from '../src/core/analyze/segment';
 import { fileStem, parseStem } from '../src/core/charset';
 import { loadCV } from '../src/core/cv';
@@ -165,6 +166,56 @@ describe('text layout', () => {
     expect(a).toEqual(b);
     expect(a).not.toEqual(c);
   });
+});
+
+/** Renders a synthetic page: known baselines, optional notebook ruling drawn in a pale colour. */
+function syntheticPage(paper: 'blank' | 'squared' | 'ruled', jitter = 0) {
+  const lib = tinyLibrary();
+  const dpi = 200;
+  const text = 'мама и тома в море у бара\nбарет и рубеж томата в ароме\nбум марта и море ветра у борта\nвремя мира о том у утра';
+  const opts = { dpi, seed: 11, jitter, rowMm: 10, xHeightMm: 3, headingMaxWords: 0, indentMm: 0, bindingMm: 0 };
+  const lay = layoutText(text, lib, opts);
+  const ppm = dpi / 25.4;
+  const W = Math.round(DEFAULT_OPTIONS.pageWmm * ppm), H = Math.round(70 * ppm);
+  const page = new Uint8Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) { page[4 * i] = 246; page[4 * i + 1] = 244; page[4 * i + 2] = 238; page[4 * i + 3] = 255; }
+  const rule = (x: number, y: number) => { const t = 4 * (y * W + x); page[t] = 176; page[t + 1] = 200; page[t + 2] = 226; };
+  if (paper !== 'blank') {
+    // lines every 5 mm (squares) or every 10 mm (ruled); text baselines fall on them
+    for (let k = 1; k * 5 * ppm < H; k++) { if (paper === 'ruled' && k % 2 === 0) continue; const y = Math.round(k * 5 * ppm); for (let x = 0; x < W; x++) rule(x, y); }
+    if (paper === 'squared') for (let k = 1; k * 5 * ppm < W; k++) { const x = Math.round(k * 5 * ppm); for (let y = 0; y < H; y++) rule(x, y); }
+  }
+  for (const ln of lay.pages[0].lines) {
+    const r = renderLine(ln, opts)!;
+    for (let y = 0; y < r.height; y++) for (let x = 0; x < r.width; x++) {
+      const s2 = 4 * (y * r.width + x), a = r.rgba[s2 + 3] / 255, t = 4 * ((r.y + y) * W + r.x + x);
+      if (!a || r.y + y >= H) continue;
+      for (let c = 0; c < 3; c++) page[t + c] = Math.round(r.rgba[s2 + c] * a + page[t + c] * (1 - a));
+    }
+  }
+  return { img: { width: W, height: H, data: page }, truth: lay.pages[0].lines.map((l) => l.baselineY), xh: 3 * ppm, ppm, W };
+}
+
+describe('notebook paper (synthetic pages with pale ruling)', () => {
+  for (const paper of ['squared', 'ruled'] as const) {
+    it(`${paper}: the ruling is recognised, erased and does not disturb the baselines`, () => {
+      const { img, truth, xh, ppm, W } = syntheticPage(paper, 0.5);
+      const pa = analyzePage(img);
+      expect(pa.ruling).not.toBeNull();
+      expect(pa.ruling!.squared).toBe(paper === 'squared');
+      if (paper === 'squared') expect(Math.abs(pa.pxPerMm! - ppm) / ppm).toBeLessThan(0.05);
+      expect(pa.lines.length).toBe(truth.length);
+      pa.lines.forEach((l, i) => expect(Math.abs(l.a * (W / 2) + l.c - truth[i]) / xh).toBeLessThan(0.15));
+      // inside a line strip no printed line may survive as ink: it would glue the letters together
+      const st = extractStrip(img, pa, pa.lines[1]);
+      let longest = 0;
+      for (let y = 0; y < st.height; y++) { let run = 0; for (let x = 0; x < st.width; x++) { if (st.ink[y * st.width + x]) { run++; longest = Math.max(longest, run); } else run = 0; } }
+      expect(longest).toBeLessThan(1.5 * st.xh);
+      let tallest = 0;
+      for (let x = 0; x < st.width; x++) { let run = 0; for (let y = 0; y < st.height; y++) { if (st.ink[y * st.width + x]) { run++; tallest = Math.max(tallest, run); } else run = 0; } }
+      expect(tallest).toBeLessThan(3.2 * st.xh);
+    });
+  }
 });
 
 describe('baseline of an ordinary page (synthetic page with known baselines)', () => {

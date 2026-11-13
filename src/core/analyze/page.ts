@@ -228,6 +228,60 @@ function bandsFromCrossings(ink: Uint8Array, w: number, h: number, sw: number): 
 }
 
 /**
+ * Erases faint straight ruling (lines and squares of a notebook) from a darkness map, window by window.
+ * A row (column) of a window is ruling when most of its pixels that are not covered by handwriting are faintly dark.
+ * Solid ink is never touched, so strokes crossing the ruling survive. Working in windows follows a ruling that is
+ * not perfectly straight or parallel to the image.
+ */
+export function eraseRuling(d: Float32Array, w: number, h: number, tLo: number, tHi: number, winX: number, winY: number): number {
+  const fLo = 0.45 * tLo;
+  const strong = new Uint8Array(w * h);
+  for (let i = 0; i < d.length; i++) strong[i] = d[i] > tHi ? 1 : 0;
+  // handwriting with its soft edge: these pixels are not counted and not erased
+  const guard = cv.dilateU8(strong, w, h, 5);
+  const kill = new Uint8Array(w * h);
+  let found = 0;
+  const pass = (horizontal: boolean) => {
+    const L = horizontal ? w : h; // along the line
+    const N = horizontal ? h : w; // across
+    const win = Math.max(16, horizontal ? winX : winY);
+    const at = (a: number, c: number) => (horizontal ? c * w + a : a * w + c); // a along, c across
+    for (let a0 = 0; a0 < L; a0 += Math.floor(win / 2)) {
+      const a1 = Math.min(L, a0 + win);
+      if (a1 - a0 < win / 2 && a0 > 0) break;
+      const frac = new Float32Array(N);
+      for (let c = 0; c < N; c++) {
+        let faint = 0;
+        let free = 0;
+        for (let a = a0; a < a1; a++) {
+          const i = at(a, c);
+          if (guard[i]) continue;
+          free++;
+          if (d[i] > fLo) faint++;
+        }
+        frac[c] = free >= 0.3 * (a1 - a0) ? faint / free : 0;
+      }
+      for (let c = 0; c < N; c++) {
+        if (frac[c] < 0.6) continue;
+        // a real ruling line is thin: darker than the rows a few pixels away on both sides
+        let c0 = c;
+        let c1 = c;
+        while (c0 - 1 >= 0 && frac[c0 - 1] >= 0.3) c0--;
+        while (c1 + 1 < N && frac[c1 + 1] >= 0.3) c1++;
+        if (c1 - c0 + 1 > Math.max(6, 0.05 * win)) { c = c1; continue; }
+        found++;
+        for (let cc = Math.max(0, c0 - 1); cc <= Math.min(N - 1, c1 + 1); cc++) for (let a = a0; a < a1; a++) kill[at(a, cc)] = 1;
+        c = c1;
+      }
+    }
+  };
+  pass(true);
+  pass(false);
+  if (found) for (let i = 0; i < d.length; i++) if (kill[i] && !guard[i]) d[i] = 0;
+  return found;
+}
+
+/**
  * The edge of a table or a shadow along the border of the photo is not handwriting: drop long, thick blobs that
  * touch the border. Handwriting that merely reaches the border of a tightly cropped picture is thin and stays.
  */
@@ -267,6 +321,8 @@ function removeRulingRows(ink: Uint8Array, w: number, h: number, rows: number[],
 export interface PageOptions {
   /** Longest side used for page-level analysis. */
   analysisSide?: number;
+  /** Receives diagnostic notes (used when tuning). */
+  debug?: (note: string) => void;
 }
 
 export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
@@ -312,7 +368,7 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
   const m0 = inkMask(d0, w, h);
 
   // --- ruling: faint, straight, periodic lines in the non-ink part of the sheet
-  const nearInk = cv.dilateU8(m0.ink, w, h, 5);
+  const nearInk = cv.dilateU8(m0.strong, w, h, 5);
   const faint = new Float32Array(w * h);
   for (let i = 0; i < faint.length; i++) faint[i] = nearInk[i] ? 0 : d0[i];
   const ra = bestAngle(faint, w, h, 5);
@@ -321,26 +377,24 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
   let skew = ra.deg;
   if (!hasRuling) {
     const inkF = new Float32Array(w * h);
-    for (let i = 0; i < inkF.length; i++) inkF[i] = m0.ink[i];
+    for (let i = 0; i < inkF.length; i++) inkF[i] = m0.strong[i];
     skew = bestAngle(inkF, w, h, 8).deg;
   }
   const M = rotationMatrix(w / 2, h / 2, skew);
   const d = Math.abs(skew) > 0.03 ? cv.warp(d0, w, h, M, w, h, 'linear', 0) : d0;
-  const mask = inkMask(d, w, h, m0.inkLevel);
-  const ink = mask.ink;
-  dropBorderBlobs(ink, w, h);
-
   let ruling: Ruling | null = null;
   let rulingRows: number[] = [];
   let pitch = 0;
   if (hasRuling) {
-    const nearInk2 = cv.dilateU8(ink, w, h, 5);
+    const solid = new Uint8Array(w * h);
+    for (let i = 0; i < solid.length; i++) solid[i] = d[i] > m0.tHi ? 1 : 0;
+    const nearInk2 = cv.dilateU8(solid, w, h, 5);
     const prof = new Float32Array(h);
     for (let y = 0; y < h; y++) {
-      let s = 0;
+      let sum = 0;
       let n = 0;
-      for (let x = 0; x < w; x++) if (!nearInk2[y * w + x]) { s += d[y * w + x]; n++; }
-      prof[y] = n ? s / n : 0;
+      for (let x = 0; x < w; x++) if (!nearInk2[y * w + x]) { sum += d[y * w + x]; n++; }
+      prof[y] = n ? sum / n : 0;
     }
     const base = smooth1d(prof, 25);
     for (let y = 0; y < h; y++) prof[y] -= base[y];
@@ -353,27 +407,72 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
       // squared paper has the same period along columns
       const cprof = new Float32Array(w);
       for (let x = 0; x < w; x++) {
-        let s = 0;
+        let sum = 0;
         let n = 0;
-        for (let y = 0; y < h; y++) if (!nearInk2[y * w + x]) { s += d[y * w + x]; n++; }
-        cprof[x] = n ? s / n : 0;
+        for (let y = 0; y < h; y++) if (!nearInk2[y * w + x]) { sum += d[y * w + x]; n++; }
+        cprof[x] = n ? sum / n : 0;
       }
       const cbase = smooth1d(cprof, 25);
       for (let x = 0; x < w; x++) cprof[x] -= cbase[x];
       const acc = autocorrPitch(cprof, 8);
       const squared = acc.value > 0.3 && Math.abs(acc.lag - pitch) <= Math.max(2, 0.08 * pitch);
       ruling = { pitch: pitch / sc, periodicity: ac.value, squared, lines: [] };
-      removeRulingRows(ink, w, h, rulingRows, 2);
     } else hasRuling = false;
   }
+  // the ruling leaves the darkness map before the ink mask is built: otherwise faint lines glue all letters together
+  eraseRuling(d, w, h, m0.tLo, m0.tHi, Math.round(w / 10), Math.round(h / 10));
+  const mask = inkMask(d, w, h, m0.inkLevel);
+  const ink = mask.ink;
+  dropBorderBlobs(ink, w, h);
+  if (rulingRows.length) removeRulingRows(ink, w, h, rulingRows, 2);
 
   const sw = strokeWidthOf(ink, w, h);
   // --- candidate lines
   interface Cand { row: number; span: number; top: number; bottom: number; }
-  const cands: Cand[] = [];
-  if (hasRuling && rulingRows.length >= 3) {
-    for (const r of rulingRows) cands.push({ row: r, span: pitch, top: r - 0.4 * pitch, bottom: r + 0.08 * pitch });
-  } else {
+  interface Raw { a: number; c: number; xh: number; x0: number; x1: number; n: number; inl: number; row: number; px: number[]; py: number[]; }
+  const win = Math.max(2, Math.round(sw));
+  const fitLines = (cands: Cand[]): Raw[] => {
+    const out: Raw[] = [];
+    cands.forEach((cd, k) => {
+      const P = cd.span;
+      const low = bandContour(ink, w, h, cd.top, cd.bottom, true, win);
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (let i = 0; i < low.xs.length; i++) if (Math.abs(low.ys[i] - cd.row) < 0.3 * P) { xs.push(low.xs[i]); ys.push(low.ys[i]); }
+      if (xs.length < 5) { opts.debug?.(`row ${cd.row}: only ${xs.length} contour points`); return; }
+      const fit = ransacLine(xs, ys, Math.max(1.5, 0.045 * P), 0.05, k + 1);
+      if (fit.count < 5 || fit.count < 0.3 * xs.length) { opts.debug?.(`row ${cd.row}: ${fit.count} of ${xs.length} points on a line`); return; }
+      // Letters rest on the line with their lowest points; stroke starts and connecting strokes end a little above it.
+      // Shift the fitted line to the lower side of the inlier band instead of its middle.
+      const resid: number[] = [];
+      for (let i = 0; i < xs.length; i++) if (fit.inliers[i]) resid.push(ys[i] - (fit.a * xs[i] + fit.c));
+      resid.sort((p, q) => p - q);
+      fit.c += resid[Math.floor(resid.length * 0.65)] ?? 0;
+      const up = bandContour(ink, w, h, cd.top, cd.bottom, false, win);
+      const res: number[] = [];
+      for (let i = 0; i < up.xs.length; i++) {
+        const r = up.ys[i] - (fit.a * up.xs[i] + fit.c);
+        if (r < -0.12 * P && r > -0.75 * P) res.push(r);
+      }
+      if (res.length < 4) { opts.debug?.(`row ${cd.row}: no top of lowercase letters (${res.length} points)`); return; }
+      const bin = Math.max(1, 0.03 * P);
+      const nb = Math.ceil((0.63 * P) / bin) + 1;
+      const hist = new Float32Array(nb);
+      for (const r of res) hist[clamp(Math.floor((r + 0.75 * P) / bin), 0, nb - 1)]++;
+      const hs = smooth1d(hist, 1.2);
+      let bi = 0;
+      for (let i = 1; i < nb; i++) if (hs[i] > hs[bi]) bi = i;
+      const xh = 0.75 * P - (bi + 0.5) * bin;
+      let x0 = w;
+      let x1 = 0;
+      for (let i = 0; i < low.xs.length; i++) { x0 = Math.min(x0, low.xs[i]); x1 = Math.max(x1, low.xs[i]); }
+      out.push({ a: fit.a, c: fit.c, xh, x0, x1, n: xs.length, inl: fit.count, row: cd.row, px: xs.filter((_, i) => fit.inliers[i]), py: ys.filter((_, i) => fit.inliers[i]) });
+    });
+    return out;
+  };
+  // candidates from the text itself: bands of dense strokes
+  const fromText: Cand[] = [];
+  {
     const bands = bandsFromCrossings(ink, w, h, sw);
     const heights = bands.map((b) => b.bottom - b.top);
     const mh = heights.length ? median(heights) : 10;
@@ -382,48 +481,18 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
     const span = gaps.length ? median(gaps) : mh * 3;
     for (const b of bands) {
       const bh = b.bottom - b.top;
-      cands.push({ row: b.bottom, span: clamp(span, mh * 2, mh * 5), top: b.top, bottom: b.bottom + 0.2 * bh });
+      fromText.push({ row: b.bottom, span: clamp(span, mh * 2, mh * 5), top: b.top, bottom: b.bottom + 0.2 * bh });
     }
   }
-
-  interface Raw { a: number; c: number; xh: number; x0: number; x1: number; n: number; inl: number; row: number; px: number[]; py: number[]; }
-  const raw: Raw[] = [];
-  const win = Math.max(2, Math.round(sw));
-  cands.forEach((cd, k) => {
-    const P = cd.span;
-    const low = bandContour(ink, w, h, cd.top, cd.bottom, true, win);
-    const xs: number[] = [];
-    const ys: number[] = [];
-    for (let i = 0; i < low.xs.length; i++) if (Math.abs(low.ys[i] - cd.row) < 0.3 * P) { xs.push(low.xs[i]); ys.push(low.ys[i]); }
-    if (xs.length < 5) return;
-    const fit = ransacLine(xs, ys, Math.max(1.5, 0.045 * P), 0.05, k + 1);
-    if (fit.count < 5 || fit.count < 0.3 * xs.length) return;
-    // Letters rest on the line with their lowest points; stroke starts and connecting strokes end a little above it.
-    // Shift the fitted line to the lower side of the inlier band instead of its middle.
-    const resid: number[] = [];
-    for (let i = 0; i < xs.length; i++) if (fit.inliers[i]) resid.push(ys[i] - (fit.a * xs[i] + fit.c));
-    resid.sort((p, q) => p - q);
-    fit.c += resid[Math.floor(resid.length * 0.65)] ?? 0;
-    const up = bandContour(ink, w, h, cd.top, cd.bottom, false, win);
-    const res: number[] = [];
-    for (let i = 0; i < up.xs.length; i++) {
-      const r = up.ys[i] - (fit.a * up.xs[i] + fit.c);
-      if (r < -0.12 * P && r > -0.75 * P) res.push(r);
-    }
-    if (res.length < 4) return;
-    const bin = Math.max(1, 0.03 * P);
-    const nb = Math.ceil((0.63 * P) / bin) + 1;
-    const hist = new Float32Array(nb);
-    for (const r of res) hist[clamp(Math.floor((r + 0.75 * P) / bin), 0, nb - 1)]++;
-    const hs = smooth1d(hist, 1.2);
-    let bi = 0;
-    for (let i = 1; i < nb; i++) if (hs[i] > hs[bi]) bi = i;
-    const xh = 0.75 * P - (bi + 0.5) * bin;
-    let x0 = w;
-    let x1 = 0;
-    for (let i = 0; i < low.xs.length; i++) { x0 = Math.min(x0, low.xs[i]); x1 = Math.max(x1, low.xs[i]); }
-    raw.push({ a: fit.a, c: fit.c, xh, x0, x1, n: xs.length, inl: fit.count, row: cd.row, px: xs.filter((_, i) => fit.inliers[i]), py: ys.filter((_, i) => fit.inliers[i]) });
-  });
+  opts.debug?.(`text bands: ${fromText.map((c) => `${Math.round(c.top)}-${Math.round(c.row)}`).join(' ')}`);
+  let raw = fitLines(fromText);
+  // candidates from the ruling: people usually write on the printed lines. Whichever explains more of the page wins,
+  // so a writer who ignores the ruling is still handled.
+  if (hasRuling && rulingRows.length >= 3) {
+    const fromRuling = fitLines(rulingRows.map((r) => ({ row: r, span: pitch, top: r - 0.4 * pitch, bottom: r + 0.08 * pitch })));
+    const score = (rs: Raw[]) => rs.reduce((n, r) => n + r.inl, 0);
+    if (score(fromRuling) > score(raw)) raw = fromRuling;
+  }
 
   // A short line (a heading, the last line of a paragraph) cannot fix its own slope: it takes the slope of the long lines.
   const long = raw.filter((r) => r.inl >= 15 && r.x1 - r.x0 > 0.4 * w);
