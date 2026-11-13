@@ -1,0 +1,14 @@
+{
+  "note": "Files that the relay workflow downloads and publishes to refs/relay/models (not a branch). Used only to bring model weights into the development sandbox.",
+  "files": [
+    {"path": "trba_lite_g2/trba_lite_g2.onnx", "url": "https://github.com/konstantinkozhin/manuscript-ocr/releases/download/v0.1.0/trba_lite_g2.onnx", "sha256": "c9a5b40c489e3480f98f3890a716acef8a8e5e2788c33afd8b007a98e34aed46"},
+    {"path": "trba_lite_g2/trba_lite_g2.json", "url": "https://github.com/konstantinkozhin/manuscript-ocr/releases/download/v0.1.0/trba_lite_g2.json", "sha256": "aa414b740ec67e0c07c5df90ad2dd2d8b8d1795bc91e098491800758c7fa5a86"},
+    {"path": "trba_lite_g2/trba_lite_g2.txt", "url": "https://github.com/konstantinkozhin/manuscript-ocr/releases/download/v0.1.0/trba_lite_g2.txt", "sha256": "60c5a8a9ba9a73085e102ac13e0d03e33f5fac369bfd5f88f4602a15bd96f45b"},
+    {"path": "trba_lite_g2/LICENSE.txt", "url": "https://github.com/konstantinkozhin/manuscript-ocr/releases/download/v0.1.0/trba_lite_g2.LICENSE.txt", "sha256": "4ededdaee09cdf791f64d276f5c08ef2ecd3fc94aca6d408cb1b4529bffeddcf"},
+    {"path": "aiforever_crnn/ocr_model.onnx", "url": "https://huggingface.co/ai-forever/ReadingPipeline-notebooks/resolve/main/ocr/ocr_model.onnx"},
+    {"path": "aiforever_crnn/ocr_config.json", "url": "https://huggingface.co/ai-forever/ReadingPipeline-notebooks/resolve/main/ocr/ocr_config.json"},
+    {"path": "ppocr_eslav/rec.onnx", "url": "https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/eslav/rec.onnx"},
+    {"path": "ppocr_eslav/dict.txt", "url": "https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/eslav/dict.txt"},
+    {"path": "ppocr_eslav/config.json", "url": "https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/eslav/config.json"}
+  ]
+}
