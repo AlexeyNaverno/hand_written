@@ -1,0 +1,13 @@
+node_modules/
+dist/
+local/
+*.log
+.DS_Store
+relay_out/
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/public/
+public/models/*.onnx
+public/ort/
