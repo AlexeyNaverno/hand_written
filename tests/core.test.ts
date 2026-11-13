@@ -4,14 +4,14 @@ import { analyzePage } from '../src/core/analyze/page';
 import type { Boundary, Primitive } from '../src/core/analyze/segment';
 import { fileStem, parseStem } from '../src/core/charset';
 import { loadCV } from '../src/core/cv';
-import { agrees } from '../src/core/harvest';
+import { agrees, shapeAgrees } from '../src/core/harvest';
 import { ransacLine, thin } from '../src/core/imgops';
 import { upgradeLegacy } from '../src/core/library';
 import { PdfWriter } from '../src/core/pdf';
 import { decodePng, encodePng } from '../src/core/png';
 import { layoutText, parseParagraphs, renderLine } from '../src/core/synth/engine';
 import { DEFAULT_OPTIONS } from '../src/core/synth/options';
-import { tinyLibrary } from './helpers';
+import { drawGlyph, tinyLibrary } from './helpers';
 
 beforeAll(async () => {
   await loadCV();
@@ -106,6 +106,22 @@ describe('recognition check of a single letter', () => {
   });
 });
 
+describe('simple signs are checked by shape', () => {
+  const b = 70, xh = 40;
+  it('equals sign needs two stacked strokes', () => {
+    const two = drawGlyph('=', [{ pts: [[6, b - 26], [34, b - 30]] }, { pts: [[6, b - 14], [34, b - 18]] }], 44, 100, b, xh, 4);
+    const one = drawGlyph('=', [{ pts: [[6, b - 20], [34, b - 22]] }], 44, 100, b, xh, 4);
+    expect(shapeAgrees(two)).toBe(true);
+    expect(shapeAgrees(one)).toBe(false);
+  });
+  it('full stop sits on the line, comma hangs below it, a letter is not judged', () => {
+    expect(shapeAgrees(drawGlyph('.', [{ pts: [[6, b - 2], [7, b - 2]] }], 14, 100, b, xh, 5))).toBe(true);
+    expect(shapeAgrees(drawGlyph('.', [{ pts: [[6, b - 30], [7, b - 30]] }], 14, 100, b, xh, 5))).toBe(false);
+    expect(shapeAgrees(drawGlyph(',', [{ pts: [[9, b - 2], [5, b + 9]] }], 16, 100, b, xh, 4))).toBe(true);
+    expect(shapeAgrees(tinyLibrary()[0])).toBeUndefined();
+  });
+});
+
 describe('text layout', () => {
   it('finds headings by the rule and by explicit marks', () => {
     const ps = parseParagraphs('Итоги\nтри слова тут.\nа это уже обычный длинный абзац текста\n**Явный заголовок из многих слов подряд**', DEFAULT_OPTIONS);
@@ -129,6 +145,17 @@ describe('text layout', () => {
     for (let i = 3; i < r.rgba.length; i += 4) { if (r.rgba[i] > 200) opaque++; else if (r.rgba[i] === 0) clear++; }
     expect(opaque).toBeGreaterThan(200);
     expect(clear).toBeGreaterThan(opaque);
+  });
+  it('a short paragraph that does not fit into one line is not a heading', () => {
+    const lib = tinyLibrary();
+    const long = 'томатомато мамамамама атаматама мематома';
+    const lay = layoutText(long, lib, { dpi: 200, xHeightMm: 4.5 });
+    expect(lay.pages[0].lines.length).toBeGreaterThan(1);
+    const first = lay.pages[0].lines[0];
+    const ppm = 200 / 25.4;
+    // written as ordinary text: starts at the paragraph indent instead of being centred
+    const left = (DEFAULT_OPTIONS.marginLeftMm + DEFAULT_OPTIONS.bindingMm + DEFAULT_OPTIONS.indentMm) * ppm;
+    expect(Math.abs(first.words[0].x0 - left)).toBeLessThan(0.8 * ppm);
   });
   it('is reproducible for the same seed and differs for another', () => {
     const lib = tinyLibrary();

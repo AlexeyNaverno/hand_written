@@ -118,6 +118,40 @@ export async function verifyGlyph(g: Glyph, ocr: CtcRecognizer): Promise<{ ok: b
   return { ok: agrees(m.char, r.text) && sure, read: r.text, p: Math.round(p * 100) / 100 };
 }
 
+/**
+ * Simple signs are judged by their shape: the recogniser is unreliable on a lone dot or dash.
+ * Returns undefined for characters this check has no opinion about.
+ */
+export function shapeAgrees(g: Glyph): boolean | undefined {
+  const m = g.meta;
+  if (!'.,-=:'.includes(m.char)) return undefined;
+  const n = m.width * m.height;
+  const bin = new Uint8Array(n);
+  for (let i = 0; i < n; i++) bin[i] = g.rgba[4 * i + 3] >= 128 ? 1 : 0;
+  const cc = cv.components(bin, m.width, m.height);
+  const xh = m.x_height;
+  const parts: { x: number; y: number; w: number; h: number; cy: number; area: number }[] = [];
+  for (let l = 1; l < cc.count; l++) {
+    if (cc.stats[l * 5 + 4] < 4) continue;
+    const x = cc.stats[l * 5], y = cc.stats[l * 5 + 1], w = cc.stats[l * 5 + 2], h = cc.stats[l * 5 + 3];
+    // height of the part's centre above the baseline, in x-heights
+    parts.push({ x, y, w, h, cy: (m.baseline - (y + h / 2)) / xh, area: cc.stats[l * 5 + 4] });
+  }
+  parts.sort((a, b) => a.y - b.y);
+  // a dash drawn quickly is rarely level: judge it by being long and thin rather than by a flat bounding box
+  const flat = (p: { w: number; h: number; area: number }) => p.w > 1.2 * p.h && Math.hypot(p.w, p.h) > 3 * (p.area / Math.hypot(p.w, p.h)) && p.h < 0.6 * xh;
+  const dot = (p: { w: number; h: number }) => p.w < 0.4 * xh && p.h < 0.4 * xh;
+  const overlap = (a: { x: number; w: number }, b: { x: number; w: number }) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0.5 * Math.min(a.w, b.w);
+  switch (m.char) {
+    case '.': return parts.length === 1 && dot(parts[0]) && Math.abs(parts[0].cy) < 0.45;
+    case ',': return parts.length === 1 && parts[0].w < 0.5 * xh && parts[0].h < 0.8 * xh && parts[0].cy < 0.2 && (m.baseline - (parts[0].y + parts[0].h)) / xh < -0.05;
+    case '-': return parts.length === 1 && flat(parts[0]) && parts[0].cy > 0.15 && parts[0].cy < 0.9;
+    case '=': return parts.length === 2 && flat(parts[0]) && flat(parts[1]) && overlap(parts[0], parts[1]);
+    case ':': return parts.length === 2 && dot(parts[0]) && dot(parts[1]) && overlap(parts[0], parts[1]);
+    default: return undefined;
+  }
+}
+
 export interface ExtractResult {
   glyphs: Glyph[];
   places: CharPlace[];
@@ -141,7 +175,10 @@ export async function extractLine(
     // shape sanity that needs no recogniser: a letter far wider or narrower than expected is not taken automatically
     const w = (m.bbox[2] - m.bbox[0]) / m.x_height;
     let auto = m.quality.auto && w > 0.08 && w < 3.2;
-    if (ocr && opts.verify !== false) {
+    const shape = shapeAgrees(g);
+    // for simple signs the shape alone decides: the alignment cost leans on the recogniser, which is weak on them
+    if (shape !== undefined) auto = shape;
+    else if (ocr && opts.verify !== false) {
       const v = await verifyGlyph(g, ocr);
       m.quality.read = v.read;
       m.quality.p = v.p;

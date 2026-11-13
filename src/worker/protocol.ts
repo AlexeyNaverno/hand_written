@@ -45,7 +45,8 @@ export interface CheckItem {
 
 export interface Commands {
   init: { args: Record<string, never>; result: { ok: true } };
-  loadOcr: { args: { urls: string[]; ortPath: string }; result: { source: string } };
+  /** `keep`: store the downloaded model in the browser cache for offline use (not needed inside the Android app). */
+  loadOcr: { args: { urls: string[]; ortPath: string; keep: boolean }; result: { source: string } };
   analyze: { args: { rgba: Uint8Array; width: number; height: number; name: string }; result: AnalyzeResult };
   extract: { args: { line: number; text: string; widths: [string, number][] }; result: { glyphs: { meta: GlyphMeta; png: Uint8Array }[] } };
   setLibrary: { args: { glyphs: StoredGlyph[] }; result: { count: number } };

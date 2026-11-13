@@ -257,6 +257,8 @@ class Composer {
 interface Paragraph {
   kind: 'text' | 'heading' | 'subheading' | 'blank';
   words: string[];
+  /** The heading was recognised by the rule (few words), not marked explicitly. */
+  byRule?: boolean;
 }
 
 export function parseParagraphs(text: string, opts: SynthOptions): Paragraph[] {
@@ -269,8 +271,9 @@ export function parseParagraphs(text: string, opts: SynthOptions): Paragraph[] {
     if (/^\*\*.+\*\*$/.test(line)) { kind = 'heading'; line = line.slice(2, -2).trim(); }
     else if (/^\*.+\*$/.test(line)) { kind = 'subheading'; line = line.slice(1, -1).trim(); }
     const words = line.split(/\s+/).filter(Boolean);
-    if (kind === 'text' && words.length < opts.headingMaxWords && !(opts.headingNoTrailingDot && /[.,;:…]$/.test(line))) kind = 'heading';
-    out.push({ kind, words });
+    let byRule = false;
+    if (kind === 'text' && words.length < opts.headingMaxWords && !(opts.headingNoTrailingDot && /[.,;:…]$/.test(line))) { kind = 'heading'; byRule = true; }
+    out.push({ kind, words, byRule });
   }
   // blank lines at the ends carry no meaning
   while (out.length && out[0].kind === 'blank') out.shift();
@@ -337,15 +340,22 @@ export function layoutText(text: string, glyphs: Glyph[], options: Partial<Synth
     if (para.kind === 'blank') { nextRow(); continue; }
     // pen thickness changes only between paragraphs; headings are usually written with a firmer hand
     const pressure = para.kind === 'text' ? 1 + opts.pressureVar * rng.range(-0.12, 0.12) : 1 + opts.pressureVar * rng.range(0.03, 0.14);
-    let indent = para.kind === 'text' ? opts.indentMm * ppm : para.kind === 'subheading' ? 2 * opts.indentMm * ppm : 0;
+    if (rowIdx >= rowsPerPage) newPage(); // the width of the page is needed below
+    const composed = para.words.map((w) => comp.word(w, pressure));
+    let kind = para.kind;
+    // a short paragraph is a heading only while it fits into one line
+    const natural = composed.reduce((n, wl) => n + wl.width, 0) + Math.max(0, composed.length - 1) * opts.wordSpace * xh;
+    if (kind === 'heading' && para.byRule && natural > contentW) kind = 'text';
+    let indent = kind === 'text' ? opts.indentMm * ppm : kind === 'subheading' ? 2 * opts.indentMm * ppm : 0;
     let items: { wl: WordLayout; x: number; text: string }[] = [];
     let x = indent;
     let lineText = '';
-    for (const w of para.words) {
-      const wl = comp.word(w, pressure);
+    for (let wi = 0; wi < para.words.length; wi++) {
+      const w = para.words[wi];
+      const wl = composed[wi];
       const space = items.length ? opts.wordSpace * xh * rng.range(0.85, 1.2) : 0;
       if (items.length && x + space + wl.width > contentW) {
-        emit(items, para.kind, x, pressure, lineText);
+        emit(items, kind, x, pressure, lineText);
         items = [];
         x = 0;
         indent = 0;
@@ -364,7 +374,7 @@ export function layoutText(text: string, glyphs: Glyph[], options: Partial<Synth
       x += sp + wl.width;
       lineText += (lineText ? ' ' : '') + w;
     }
-    if (items.length) emit(items, para.kind, x, pressure, lineText);
+    if (items.length) emit(items, kind, x, pressure, lineText);
   }
   if (!pages.length) newPage();
   return { pages, missing: [...comp.missing] };

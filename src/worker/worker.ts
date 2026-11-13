@@ -26,8 +26,8 @@ let library: Glyph[] = [];
 type Progress = (done: number, total: number, note?: string) => void;
 type Handler<C extends keyof Commands> = (args: Commands[C]['args'], progress: Progress) => Promise<{ result: Commands[C]['result']; transfer?: Transferable[] }>;
 
-async function fetchModel(url: string, progress: Progress): Promise<Uint8Array | null> {
-  const cache = 'caches' in ctx ? await caches.open('hw-models-v1') : null;
+async function fetchModel(url: string, progress: Progress, keep: boolean): Promise<Uint8Array | null> {
+  const cache = keep && 'caches' in ctx ? await caches.open('hw-models-v1') : null;
   const hit = cache ? await cache.match(url) : undefined;
   if (hit) return new Uint8Array(await hit.arrayBuffer());
   let res: globalThis.Response;
@@ -94,12 +94,12 @@ const handlers: { [C in keyof Commands]: Handler<C> } = {
     return { result: { ok: true } };
   },
 
-  async loadOcr({ urls, ortPath }, progress) {
+  async loadOcr({ urls, ortPath, keep }, progress) {
     // only the .wasm file is fetched; the JavaScript part of the runtime is inside the bundle
     ort.env.wasm.wasmPaths = { wasm: `${ortPath}ort-wasm-simd-threaded.wasm` };
     ort.env.wasm.numThreads = 1;
     for (const url of urls) {
-      const bytes = await fetchModel(url, progress);
+      const bytes = await fetchModel(url, progress, keep);
       if (!bytes) continue;
       const session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
       ocr = new CtcRecognizer(ort as never, session as never);

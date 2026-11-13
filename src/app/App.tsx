@@ -3,6 +3,7 @@ import type { StoredGlyph } from '../worker/protocol';
 import { dbAll } from './db';
 import { Harvest } from './Harvest';
 import { Library } from './Library';
+import { isNative } from './platform';
 import { call } from './rpc';
 import { Write } from './Write';
 
@@ -27,7 +28,7 @@ export function App() {
   const loadOcr = useCallback(async () => {
     setOcr({ state: 'loading', note: 'загрузка модели…' });
     try {
-      await call('loadOcr', { urls: MODEL_URLS, ortPath: new URL('./ort/', document.baseURI).href }, (p) => {
+      await call('loadOcr', { urls: MODEL_URLS, ortPath: new URL('./ort/', document.baseURI).href, keep: !isNative() }, (p) => {
         const mb = (p.done / 1e6).toFixed(0);
         setOcr({ state: 'loading', note: p.total ? `загрузка модели: ${mb} из ${(p.total / 1e6).toFixed(0)} МБ` : `загрузка модели: ${mb} МБ` });
       });
