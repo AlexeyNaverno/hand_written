@@ -37,13 +37,23 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-/** Saves a file: a normal download in the browser, the Documents folder plus the share sheet in the Android app. */
+/** Saves a file: a normal download in the browser; in the Android app the file is handed to the system share sheet. */
 export async function saveFile(name: string, bytes: Uint8Array, mime: string): Promise<string> {
   const c = cap();
   if (isNative() && c?.Plugins?.Filesystem) {
-    const res = await c.Plugins.Filesystem.writeFile({ path: `Pocherk/${name}`, data: toBase64(bytes), directory: 'DOCUMENTS', recursive: true });
-    if (c.Plugins.Share) await c.Plugins.Share.share({ title: name, url: res.uri }).catch(() => undefined);
-    return `Сохранено: Документы/Pocherk/${name}`;
+    const fsys = c.Plugins.Filesystem;
+    const data = toBase64(bytes);
+    // the cache folder is always writable; from there the share sheet can pass the file to any app or to "Files"
+    const tmp = await fsys.writeFile({ path: name, data, directory: 'CACHE' });
+    let note = '';
+    try {
+      await fsys.writeFile({ path: `Pocherk/${name}`, data, directory: 'DOCUMENTS', recursive: true });
+      note = ` Копия: Документы/Pocherk/${name}.`;
+    } catch {
+      note = '';
+    }
+    if (c.Plugins.Share) await c.Plugins.Share.share({ title: name, files: [tmp.uri] }).catch(() => undefined);
+    return `Файл ${name} готов.${note}`;
   }
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
   const a = document.createElement('a');

@@ -11,7 +11,7 @@ function copyOrt() {
       const src = path.resolve('node_modules/onnxruntime-web/dist');
       const dst = path.resolve('public/ort');
       fs.mkdirSync(dst, { recursive: true });
-      for (const f of ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs']) {
+      for (const f of ['ort-wasm-simd-threaded.wasm']) {
         const from = path.join(src, f);
         const to = path.join(dst, f);
         if (fs.existsSync(from) && (!fs.existsSync(to) || fs.statSync(to).size !== fs.statSync(from).size)) fs.copyFileSync(from, to);

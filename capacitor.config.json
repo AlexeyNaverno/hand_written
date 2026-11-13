@@ -1,0 +1,8 @@
+{
+  "appId": "ru.pocherk.app",
+  "appName": "Почерк",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}

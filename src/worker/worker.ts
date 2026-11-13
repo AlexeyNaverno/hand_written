@@ -95,7 +95,8 @@ const handlers: { [C in keyof Commands]: Handler<C> } = {
   },
 
   async loadOcr({ urls, ortPath }, progress) {
-    ort.env.wasm.wasmPaths = ortPath;
+    // only the .wasm file is fetched; the JavaScript part of the runtime is inside the bundle
+    ort.env.wasm.wasmPaths = { wasm: `${ortPath}ort-wasm-simd-threaded.wasm` };
     ort.env.wasm.numThreads = 1;
     for (const url of urls) {
       const bytes = await fetchModel(url, progress);
