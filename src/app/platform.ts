@@ -25,10 +25,9 @@ export async function decodeImageFile(file: Blob, maxSide = 4096): Promise<{ rgb
 
 interface CapacitorLike {
   isNativePlatform?: () => boolean;
-  Plugins?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
-const cap = (): CapacitorLike | undefined => (globalThis as unknown as { Capacitor?: CapacitorLike }).Capacitor;
-export const isNative = () => !!cap()?.isNativePlatform?.();
+/** The Android wrapper injects this object into the page. */
+export const isNative = () => !!(globalThis as unknown as { Capacitor?: CapacitorLike }).Capacitor?.isNativePlatform?.();
 
 function toBase64(bytes: Uint8Array): string {
   let s = '';
@@ -39,20 +38,20 @@ function toBase64(bytes: Uint8Array): string {
 
 /** Saves a file: a normal download in the browser; in the Android app the file is handed to the system share sheet. */
 export async function saveFile(name: string, bytes: Uint8Array, mime: string): Promise<string> {
-  const c = cap();
-  if (isNative() && c?.Plugins?.Filesystem) {
-    const fsys = c.Plugins.Filesystem;
+  if (isNative()) {
+    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+    const { Share } = await import('@capacitor/share');
     const data = toBase64(bytes);
     // the cache folder is always writable; from there the share sheet can pass the file to any app or to "Files"
-    const tmp = await fsys.writeFile({ path: name, data, directory: 'CACHE' });
+    const tmp = await Filesystem.writeFile({ path: name, data, directory: Directory.Cache });
     let note = '';
     try {
-      await fsys.writeFile({ path: `Pocherk/${name}`, data, directory: 'DOCUMENTS', recursive: true });
+      await Filesystem.writeFile({ path: `Pocherk/${name}`, data, directory: Directory.Documents, recursive: true });
       note = ` Копия: Документы/Pocherk/${name}.`;
     } catch {
       note = '';
     }
-    if (c.Plugins.Share) await c.Plugins.Share.share({ title: name, files: [tmp.uri] }).catch(() => undefined);
+    await Share.share({ title: name, files: [tmp.uri] }).catch(() => undefined);
     return `Файл ${name} готов.${note}`;
   }
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));

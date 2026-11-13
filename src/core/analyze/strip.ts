@@ -82,6 +82,21 @@ export function extractStrip(img: RGBA, page: PageAnalysis, line: TextLine): Lin
   const rgba = cv.warp(img.data instanceof Uint8Array ? img.data : new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength),
     img.width, img.height, M, width, height, 'cubic', 255, 4);
   const n = width * height;
+  const toPage = invertAffine(M);
+  if (page.sheet) {
+    // whatever lies outside the sheet (table, fingers) becomes blank paper
+    const sh = page.sheet;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const px = Math.round((toPage[0] * x + toPage[1] * y + toPage[2]) * sh.scale);
+        const py = Math.round((toPage[3] * x + toPage[4] * y + toPage[5]) * sh.scale);
+        if (px < 0 || py < 0 || px >= sh.width || py >= sh.height || !sh.data[py * sh.width + px]) {
+          const t = 4 * (y * width + x);
+          rgba[t] = rgba[t + 1] = rgba[t + 2] = 255;
+        }
+      }
+    }
+  }
   const gray = new Uint8Array(n);
   for (let i = 0, j = 0; i < n; i++, j += 4) {
     if (rgba[j + 3] < 255) { rgba[j] = rgba[j + 1] = rgba[j + 2] = 255; rgba[j + 3] = 255; }
@@ -91,7 +106,6 @@ export function extractStrip(img: RGBA, page: PageAnalysis, line: TextLine): Lin
   const dark = darkness(gray, width, height, Math.round(Math.max(15, 1.5 * xh)) | 1);
   const mask = inkMask(dark, width, height, page.inkLevel);
   const ink = mask.ink;
-  const toPage = invertAffine(M);
 
   // --- erase ruling lines that run through the strip, keeping strokes that cross them
   if (page.ruling) {

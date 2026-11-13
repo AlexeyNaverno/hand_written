@@ -43,6 +43,8 @@ export interface PageAnalysis {
   /** Typical darkness (0..1) of solid ink, used to normalise glyph opacity. */
   inkLevel: number;
   lines: TextLine[];
+  /** The sheet itself (1) versus the table around it (0), at a reduced scale; null when the sheet fills the photo. */
+  sheet: { data: Uint8Array; width: number; height: number; scale: number } | null;
 }
 
 export function minChannel(img: RGBA): Uint8Array {
@@ -225,6 +227,29 @@ function bandsFromCrossings(ink: Uint8Array, w: number, h: number, sw: number): 
   return bands;
 }
 
+/**
+ * The edge of a table or a shadow along the border of the photo is not handwriting: drop long, thick blobs that
+ * touch the border. Handwriting that merely reaches the border of a tightly cropped picture is thin and stays.
+ */
+function dropBorderBlobs(ink: Uint8Array, w: number, h: number): void {
+  const cc = cv.components(ink, w, h);
+  const dt = cv.distance(ink, w, h);
+  const all: number[] = [];
+  const step = Math.max(1, Math.floor(ink.length / 200000));
+  for (let i = 0; i < ink.length; i += step) if (ink[i]) all.push(dt[i]);
+  const thick = Math.max(4, 4 * (all.length ? median(all) : 1));
+  const maxDt = new Float32Array(cc.count);
+  for (let i = 0; i < ink.length; i++) { const l = cc.labels[i]; if (l && dt[i] > maxDt[l]) maxDt[l] = dt[i]; }
+  const drop = new Uint8Array(cc.count);
+  const limit = 0.2 * Math.max(w, h);
+  for (let l = 1; l < cc.count; l++) {
+    const x = cc.stats[l * 5], y = cc.stats[l * 5 + 1], bw = cc.stats[l * 5 + 2], bh = cc.stats[l * 5 + 3];
+    const touches = x <= 1 || y <= 1 || x + bw >= w - 1 || y + bh >= h - 1;
+    if (touches && Math.max(bw, bh) > limit && maxDt[l] > thick) drop[l] = 1;
+  }
+  for (let i = 0; i < ink.length; i++) if (drop[cc.labels[i]]) ink[i] = 0;
+}
+
 function removeRulingRows(ink: Uint8Array, w: number, h: number, rows: number[], half: number): void {
   for (const r of rows) {
     const a = Math.max(0, r - half);
@@ -254,6 +279,36 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
   const grayFull = minChannel(img);
   const gray = sc < 1 ? cv.resize(grayFull, W, H, w, h, 'area') : grayFull;
   const d0 = darkness(gray, w, h, odd(Math.max(w, h) / 40));
+  // --- the sheet versus what surrounds it: large areas much darker than paper that reach the border of the photo
+  // (a table, a shadow, fingers) must not be read as ink
+  let sheet: Uint8Array | null = null;
+  {
+    const smooth = cv.blur(gray, w, h, 5);
+    const sample: number[] = [];
+    const step = Math.max(1, Math.floor(smooth.length / 50000));
+    for (let i = 0; i < smooth.length; i += step) sample.push(smooth[i]);
+    const paper = median(sample);
+    const dark = new Uint8Array(w * h);
+    for (let i = 0; i < dark.length; i++) dark[i] = smooth[i] < 0.62 * paper ? 1 : 0;
+    const cc = cv.components(dark, w, h);
+    const outside = new Uint8Array(cc.count);
+    let any = false;
+    for (let l = 1; l < cc.count; l++) {
+      const x = cc.stats[l * 5], y = cc.stats[l * 5 + 1], bw = cc.stats[l * 5 + 2], bh = cc.stats[l * 5 + 3];
+      const touches = x <= 1 || y <= 1 || x + bw >= w - 1 || y + bh >= h - 1;
+      if (touches && cc.stats[l * 5 + 4] >= 0.003 * w * h) { outside[l] = 1; any = true; }
+    }
+    if (any) {
+      let out = new Uint8Array(w * h);
+      for (let i = 0; i < out.length; i++) out[i] = outside[cc.labels[i]];
+      out = cv.dilateU8(out, w, h, odd(Math.max(w, h) / 90)) as Uint8Array<ArrayBuffer>;
+      sheet = new Uint8Array(w * h);
+      for (let i = 0; i < out.length; i++) {
+        sheet[i] = out[i] ? 0 : 1;
+        if (out[i]) d0[i] = 0;
+      }
+    }
+  }
   const m0 = inkMask(d0, w, h);
 
   // --- ruling: faint, straight, periodic lines in the non-ink part of the sheet
@@ -273,6 +328,7 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
   const d = Math.abs(skew) > 0.03 ? cv.warp(d0, w, h, M, w, h, 'linear', 0) : d0;
   const mask = inkMask(d, w, h, m0.inkLevel);
   const ink = mask.ink;
+  dropBorderBlobs(ink, w, h);
 
   let ruling: Ruling | null = null;
   let rulingRows: number[] = [];
@@ -421,5 +477,6 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
     xHeight: xhPage / sc,
     inkLevel: m0.inkLevel,
     lines,
+    sheet: sheet ? { data: sheet, width: w, height: h, scale: sc } : null,
   };
 }

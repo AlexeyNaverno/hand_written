@@ -95,6 +95,14 @@ export function dilateU8(src: Uint8Array, w: number, h: number, kx: number, ky =
   });
 }
 
+export function erodeU8(src: Uint8Array, w: number, h: number, kx: number, ky = kx): Uint8Array {
+  return run1(src, w, h, 1, (c, s, d) => {
+    const k = c.getStructuringElement(c.MORPH_RECT, new c.Size(kx, ky));
+    c.erode(s, d, k);
+    k.delete();
+  });
+}
+
 export function blur<T extends Uint8Array | Float32Array>(src: T, w: number, h: number, sigma: number): T {
   if (sigma <= 0) return src.slice() as T;
   return run1(src, w, h, 1, (c, s, d) => c.GaussianBlur(s, d, new c.Size(0, 0), sigma, sigma, c.BORDER_REPLICATE));
