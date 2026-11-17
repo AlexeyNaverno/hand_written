@@ -1,0 +1,8 @@
+[
+ {
+  "path": "aiforever_crnn/ocr_model.onnx",
+  "url": "https://huggingface.co/ai-forever/ReadingPipeline-notebooks/resolve/main/ocr/ocr_model.onnx",
+  "sha256": "cc5ada98e82336c3e229b78aff6758cda6c92e6ca2cae5d9118b3e447994fd6e",
+  "size": 50175647
+ }
+]
