@@ -1,0 +1,60 @@
+name: android
+
+# Builds an installable Android package (APK). The web app is wrapped with Capacitor; the recogniser model
+# is packed inside, so the installed app needs no network at all.
+on:
+  push:
+    branches: [main, 'arena/**']
+    tags: ['v*']
+    paths-ignore: ['**.md', 'tools/ci/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - name: Recogniser model (not stored in the repository)
+        run: node tools/fetch-model.mjs
+      - run: npm run build
+      - name: Create the Android project
+        run: |
+          npx cap add android
+          npx cap sync android
+      - name: Build the APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --console=plain
+      - run: cp android/app/build/outputs/apk/debug/app-debug.apk pocherk.apk && ls -la pocherk.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocherk-apk
+          path: pocherk.apk
+      - name: Publish as a pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: 'Почерк для Android: последняя сборка'
+          prerelease: true
+          make_latest: false
+          files: pocherk.apk
+          body: |
+            Автоматическая сборка из ветки `${{ github.ref_name }}` (коммит ${{ github.sha }}).
+            Скачайте `pocherk.apk` на телефон и откройте его; Android попросит разрешить установку из этого источника.
+            Сборка отладочная (подписана отладочным ключом), работает без интернета.
