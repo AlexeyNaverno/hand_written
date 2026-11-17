@@ -1,6 +1,0 @@
-{
-  "note": "Files that the relay workflow downloads and publishes to refs/relay/models (not a branch). Used only to bring model weights into the development sandbox.",
-  "files": [
-    {"path": "aiforever_crnn/ocr_model.onnx", "url": "https://huggingface.co/ai-forever/ReadingPipeline-notebooks/resolve/main/ocr/ocr_model.onnx"}
-  ]
-}
