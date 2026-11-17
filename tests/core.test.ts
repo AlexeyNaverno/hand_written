@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { alignText } from '../src/core/analyze/align';
-import { analyzePage } from '../src/core/analyze/page';
-import { extractStrip } from '../src/core/analyze/strip';
+import { analyzePage, evalCurve, linesFromWords, WordBand } from '../src/core/analyze/page';
+import { extractStrip, LineStrip } from '../src/core/analyze/strip';
 import type { Boundary, Primitive } from '../src/core/analyze/segment';
 import { fileStem, parseStem } from '../src/core/charset';
 import { loadCV } from '../src/core/cv';
@@ -245,5 +245,72 @@ describe('baseline of an ordinary page (synthetic page with known baselines)', (
       expect(Math.abs(y - truth[i]) / xh).toBeLessThan(0.1);
       expect(Math.abs(l.xHeight - xh) / xh).toBeLessThan(0.25);
     });
+  });
+});
+
+describe('rows from the neural word detector', () => {
+  const band = (x0: number, x1: number, yb: (x: number) => number, xh: number): WordBand => {
+    const xs: number[] = [];
+    const base: number[] = [];
+    const top: number[] = [];
+    for (let x = x0; x <= x1; x += 6) { xs.push(x); base.push(yb(x)); top.push(yb(x) - xh); }
+    return { x0, x1, xs, base, top, xh };
+  };
+  it('stacks words into rows and keeps the curve of a wavy row', () => {
+    const wave = (x: number) => 300 + 8 * Math.sin(x / 60);
+    const words: WordBand[] = [
+      band(40, 200, () => 100, 20), band(230, 420, () => 102, 20),
+      band(40, 180, wave, 21), band(200, 360, wave, 20), band(380, 520, wave, 20),
+      band(60, 300, () => 500, 19),
+    ];
+    const lines = linesFromWords(words, 600, 600);
+    expect(lines.length).toBe(3);
+    expect(lines[0].xHeight).toBeCloseTo(20, 1);
+    const wavy = lines[1];
+    for (const x of [60, 150, 260, 350, 460, 510]) expect(Math.abs(evalCurve(wavy.curve!, x) - wave(x))).toBeLessThan(1.5);
+    // the straight fit alone cannot follow the wave
+    expect(Math.max(...[60, 260, 460].map((x) => Math.abs(wavy.a * x + wavy.c - wave(x))))).toBeGreaterThan(3);
+    expect(lines[2].partial).toBe(false);
+  });
+  it('the strip of a curved row comes out level', async () => {
+    const W = 900;
+    const H = 400;
+    const xh = 30;
+    const yb = (x: number) => 200 + 10 * Math.sin(x / 80);
+    const page = new Uint8Array(W * H * 4).fill(255);
+    const stamp = (cx: number, cy: number) => {
+      for (let y = Math.floor(cy - 3); y <= cy + 3; y++) for (let x = Math.floor(cx - 3); x <= cx + 3; x++) {
+        if (Math.hypot(x - cx, y - cy) > 2.5 || x < 0 || y < 0 || x >= W || y >= H) continue;
+        const t = 4 * (y * W + x);
+        page[t] = 30; page[t + 1] = 40; page[t + 2] = 130; page[t + 3] = 255;
+      }
+    };
+    for (let x = 40; x < W - 40; x += 46) {
+      for (let y = yb(x) - xh; y <= yb(x); y += 2) stamp(x, y); // a stroke standing on the curved baseline
+      for (let xx = x; xx < x + 30; xx += 2) stamp(xx, yb(xx) - 1); // a connecting stroke along it
+    }
+    const img = { width: W, height: H, data: page };
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let x = 30; x <= W - 30; x += 6) { xs.push(x); ys.push(yb(x)); }
+    const curve = { xs, ys };
+    const mk = (withCurve: boolean) => ({
+      width: W, height: H, skewDeg: 0, ruling: null, pxPerMm: null, strokeWidth: 5, xHeight: xh, inkLevel: 1, sheet: null,
+      lines: [{ id: 0, a: 0, c: 200, curve: withCurve ? curve : undefined, xHeight: xh, x0: 30, x1: W - 30, points: 10, inliers: 10, partial: false }],
+    });
+    const bottoms = (st: LineStrip) => {
+      const v: number[] = [];
+      for (let x = 0; x < st.width; x += 3) {
+        let y = st.height - 1;
+        while (y >= 0 && !st.ink[y * st.width + x]) y--;
+        if (y >= 0 && y > st.baseY - 0.4 * st.xh) v.push(y - st.baseY);
+      }
+      v.sort((p, q) => p - q);
+      return v[v.length - 1] - v[0];
+    };
+    const level = bottoms(extractStrip(img, mk(true) as never, mk(true).lines[0]));
+    const wavy = bottoms(extractStrip(img, mk(false) as never, mk(false).lines[0]));
+    expect(level).toBeLessThan(0.3 * xh * 4); // in strip pixels, scale ≤ 4
+    expect(level).toBeLessThan(wavy / 3);
   });
 });

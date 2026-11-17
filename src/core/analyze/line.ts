@@ -3,9 +3,9 @@ import * as cv from '../cv';
 import { CtcRecognizer, WordReading } from '../ocr/ctc';
 import { RGBA } from '../types';
 import { FrameEvidence } from './align';
-import { PageAnalysis, TextLine } from './page';
+import { evalCurve, PageAnalysis, TextLine } from './page';
 import { Segmentation, segmentLine } from './segment';
-import { LineStrip, extractStrip } from './strip';
+import { applyAffine, LineStrip, extractStrip } from './strip';
 
 export interface WordBox {
   /** Primitive range [p0, p1). */
@@ -77,6 +77,11 @@ export function wordCrop(img: RGBA, st: LineStrip, rect: { x: number; y: number;
   const w = Math.max(2, Math.ceil(rect.w / S));
   const h = Math.max(2, Math.ceil(rect.h / S));
   const Mc = [M[0] / S, M[1] / S, (M[2] - rect.x) / S, M[3] / S, M[4] / S, (M[5] - rect.y) / S];
+  // a curved row was levelled in the strip: fetch the word from the page at the same vertical offset
+  if (st.curve) {
+    const pc = applyAffine(st.toPage, rect.x + rect.w / 2, rect.y + rect.h / 2);
+    Mc[5] += evalCurve(st.curve, pc.x) - (st.lineA * pc.x + st.lineC);
+  }
   const src = img.data instanceof Uint8Array ? img.data : new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength);
   const out = cv.warp(src, img.width, img.height, Mc, w, h, 'linear', 255, 4);
   for (let y = 0; y < h; y++) {

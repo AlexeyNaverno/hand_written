@@ -14,6 +14,8 @@ const MODEL_URLS = [
   new URL('./models/ocr_model.onnx', document.baseURI).href,
   'https://huggingface.co/ai-forever/ReadingPipeline-notebooks/resolve/main/ocr/ocr_model.onnx',
 ];
+/** The row detector ships with the app; without it the rows fall back to the ruling and text bands. */
+const DET_URLS = [new URL('./models/det_model.onnx', document.baseURI).href];
 
 export type OcrState = { state: 'off' | 'loading' | 'ready' | 'error'; note: string };
 
@@ -28,7 +30,7 @@ export function App() {
   const loadOcr = useCallback(async () => {
     setOcr({ state: 'loading', note: 'загрузка модели…' });
     try {
-      await call('loadOcr', { urls: MODEL_URLS, ortPath: new URL('./ort/', document.baseURI).href, keep: !isNative() }, (p) => {
+      await call('loadOcr', { urls: MODEL_URLS, detUrls: DET_URLS, ortPath: new URL('./ort/', document.baseURI).href, keep: !isNative() }, (p) => {
         const mb = (p.done / 1e6).toFixed(0);
         setOcr({ state: 'loading', note: p.total ? `загрузка модели: ${mb} из ${(p.total / 1e6).toFixed(0)} МБ` : `загрузка модели: ${mb} МБ` });
       });

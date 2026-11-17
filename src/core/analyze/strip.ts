@@ -5,7 +5,7 @@
 import * as cv from '../cv';
 import { RGBA, clamp } from '../types';
 import { propagateLabels } from '../imgops';
-import { PageAnalysis, TextLine, darkness, eraseRuling, inkMask } from './page';
+import { evalCurve, PageAnalysis, TextLine, darkness, eraseRuling, inkMask } from './page';
 
 export interface LineStrip {
   lineId: number;
@@ -24,6 +24,11 @@ export interface LineStrip {
   inkLevel: number;
   /** Writing slant as tan(angle from vertical); positive = leaning right. */
   slant: number;
+  /** The row's baseline curve in page coordinates, when the row came from the detector; else null. */
+  curve: { xs: number[]; ys: number[] } | null;
+  /** The straight baseline fit of the row in page coordinates (y = lineA·x + lineC). */
+  lineA: number;
+  lineC: number;
   /** Affine map strip → page: [a, b, tx, c, d, ty]. */
   toPage: number[];
   fromPage: number[];
@@ -94,6 +99,28 @@ export function extractStrip(img: RGBA, page: PageAnalysis, line: TextLine): Lin
           const t = 4 * (y * width + x);
           rgba[t] = rgba[t + 1] = rgba[t + 2] = 255;
         }
+      }
+    }
+  }
+  // A row found by the detector keeps its own shape: every column is shifted so that the curved baseline
+  // of the row becomes the straight baseY of the strip. Letter-level work then sees a level row.
+  if (line.curve) {
+    const col = new Uint8Array(height * 4);
+    for (let x = 0; x < width; x++) {
+      const p = applyAffine(toPage, x, baseY);
+      const s = Math.round((evalCurve(line.curve, p.x) - (line.a * p.x + line.c)) * S);
+      if (!s) continue;
+      for (let y = 0; y < height; y++) {
+        const ys = y + s;
+        const t = 4 * (y * width + x);
+        if (ys >= 0 && ys < height) {
+          const q = 4 * (ys * width + x);
+          col[t] = rgba[q]; col[t + 1] = rgba[q + 1]; col[t + 2] = rgba[q + 2]; col[t + 3] = rgba[q + 3];
+        } else col[t] = col[t + 1] = col[t + 2] = col[t + 3] = 255;
+      }
+      for (let y = 0; y < height; y++) {
+        const t = 4 * (y * width + x);
+        rgba[t] = col[t]; rgba[t + 1] = col[t + 1]; rgba[t + 2] = col[t + 2]; rgba[t + 3] = col[t + 3];
       }
     }
   }
@@ -232,5 +259,5 @@ export function extractStrip(img: RGBA, page: PageAnalysis, line: TextLine): Lin
   ridge.sort((p, q) => p - q);
   const sw = ridge.length ? Math.max(2, 2 * ridge[ridge.length >> 1] - 0.5) : 3;
   const slant = estimateSlant(ink, width, height, baseY, xh);
-  return { lineId: line.id, scale: S, width, height, rgba, dark, ink, baseY, xh, sw, inkLevel: page.inkLevel, slant, toPage, fromPage: M, foreign };
+  return { lineId: line.id, scale: S, width, height, rgba, dark, ink, baseY, xh, sw, inkLevel: page.inkLevel, slant, curve: line.curve ?? null, lineA: line.a, lineC: line.c, toPage, fromPage: M, foreign };
 }

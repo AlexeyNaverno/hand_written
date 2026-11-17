@@ -10,9 +10,11 @@ import { RGBA, clamp, median } from '../types';
 
 export interface TextLine {
   id: number;
-  /** Baseline y = a·x + c in full-resolution page coordinates. */
+  /** Straight baseline y = a·x + c in full-resolution page coordinates (a least-squares fit of the curve). */
   a: number;
   c: number;
+  /** The baseline as it really runs, word by word; absent when the line is a single straight fit. */
+  curve?: { xs: number[]; ys: number[] };
   /** Distance from the baseline to the top of lowercase letters, px. */
   xHeight: number;
   x0: number;
@@ -21,6 +23,36 @@ export interface TextLine {
   inliers: number;
   /** The line is cut by the image border and should not be harvested. */
   partial: boolean;
+}
+
+/** A word (or a tight group of words) found by the text detector, with its own baseline and x-line. */
+export interface WordBand {
+  x0: number;
+  x1: number;
+  /** Sampled points of the baseline and of the top of lowercase letters, full-resolution page coordinates. */
+  xs: number[];
+  base: number[];
+  top: number[];
+  /** This word's lowercase height, px. */
+  xh: number;
+}
+
+/** Baseline of a (possibly curved) line at a page x; flat outside the measured span. */
+export function evalCurve(curve: { xs: number[]; ys: number[] }, x: number): number {
+  const xs = curve.xs;
+  if (!xs.length) return NaN;
+  if (x <= xs[0]) return curve.ys[0];
+  const last = xs.length - 1;
+  if (x >= xs[last]) return curve.ys[last];
+  let lo = 0;
+  let hi = last;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] <= x) lo = mid;
+    else hi = mid;
+  }
+  const t = (x - xs[lo]) / Math.max(1e-6, xs[hi] - xs[lo]);
+  return curve.ys[lo] * (1 - t) + curve.ys[hi] * t;
 }
 
 export interface Ruling {
@@ -323,6 +355,117 @@ export interface PageOptions {
   analysisSide?: number;
   /** Receives diagnostic notes (used when tuning). */
   debug?: (note: string) => void;
+  /** Words found by the neural text detector; when present, the rows and their lines come from them. */
+  words?: WordBand[];
+}
+
+/**
+ * Rows and their baselines from the detector's word bands: words stack into rows by height, and the baseline
+ * of a row is the polyline of its words' own baselines, so a tilted or wavy row keeps its own shape.
+ */
+export function linesFromWords(words: WordBand[], W: number, H: number, debug?: (note: string) => void): TextLine[] {
+  if (words.length < 2) return [];
+  const xh0 = median(words.map((wd) => wd.xh));
+  const buildCurve = (ws: WordBand[]) => {
+    const pts: { x: number; y: number }[] = [];
+    for (const wd of ws) for (let i = 0; i < wd.xs.length; i++) pts.push({ x: wd.xs[i], y: wd.base[i] });
+    pts.sort((p, q) => p.x - q.x);
+    const bin = Math.max(2, 0.1 * xh0);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    let i = 0;
+    while (i < pts.length) {
+      const xa = pts[i].x;
+      let sy = 0;
+      let n = 0;
+      while (i < pts.length && pts[i].x < xa + bin) { sy += pts[i].y; n++; i++; }
+      xs.push(xa);
+      ys.push(sy / n);
+    }
+    return { xs, ys };
+  };
+  const midY = (wd: WordBand) => wd.base[(wd.base.length - 1) >> 1];
+  interface Row { ws: WordBand[]; x0: number; x1: number; curve: { xs: number[]; ys: number[] } }
+  const rows: Row[] = [];
+  // a row's own tilt continues a little past its ends, so the next word of a slanted row still joins it
+  const rowY = (r: Row, x: number) => {
+    const xs = r.curve.xs;
+    const ys = r.curve.ys;
+    const n = xs.length;
+    if (n < 2) return ys[0];
+    // the tilt of a row continues a little past its ends, but never far: noise must not stack up
+    const ext = 2 * xh0;
+    if (x < xs[0]) return ys[0] + ((ys[1] - ys[0]) / (xs[1] - xs[0])) * Math.max(x - xs[0], -ext);
+    if (x > xs[n - 1]) return ys[n - 1] + ((ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2])) * Math.min(x - xs[n - 1], ext);
+    return evalCurve(r.curve, x);
+  };
+  for (const i of words.map((_, k) => k).sort((p, q) => midY(words[p]) - midY(words[q]))) {
+    const wd = words[i];
+    const xm = 0.5 * (wd.x0 + wd.x1);
+    const ym = midY(wd);
+    let best = -1;
+    let bestD = Infinity;
+    for (let k = 0; k < rows.length; k++) {
+      const r = rows[k];
+      // the word must sit next to the row, not in a far column of the page
+      if (Math.max(r.x0 - wd.x1, wd.x0 - r.x1) > 3 * xh0) continue;
+      const d = Math.abs(ym - rowY(r, xm));
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    if (best >= 0 && bestD < 0.55 * xh0) {
+      const r = rows[best];
+      r.ws.push(wd);
+      r.x0 = Math.min(r.x0, wd.x0);
+      r.x1 = Math.max(r.x1, wd.x1);
+      r.curve = buildCurve(r.ws);
+    } else rows.push({ ws: [wd], x0: wd.x0, x1: wd.x1, curve: buildCurve([wd]) });
+  }
+  // A word the detector split off, or whose own snap wobbled, may sit just past the end of its row:
+  // rows that almost touch horizontally and whose baselines almost meet are one row.
+  for (;;) {
+    let bi = -1;
+    let bj = -1;
+    let bd = Infinity;
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = 0; j < rows.length; j++) {
+        if (i === j) continue;
+        const A = rows[i];
+        const B = rows[j];
+        if (A.x1 > B.x0) continue;
+        if (B.x0 - A.x1 > 2.5 * xh0) continue;
+        const d = Math.abs(A.curve.ys[A.curve.ys.length - 1] - B.curve.ys[0]);
+        if (d < 0.8 * xh0 && d < bd) { bd = d; bi = i; bj = j; }
+      }
+    }
+    if (bi < 0) break;
+    const A = rows[bi];
+    const B = rows[bj];
+    A.ws.push(...B.ws);
+    A.x1 = B.x1;
+    A.curve = buildCurve(A.ws);
+    rows.splice(bj, 1);
+  }
+  debug?.(`words: ${words.length} bands in ${rows.length} rows`);
+  const lines: TextLine[] = rows.map((r, id) => {
+    const xs = r.curve.xs;
+    const ys = r.curve.ys;
+    const n = xs.length;
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = ys.reduce((a, b) => a + b, 0) / n;
+    let sxx = 0;
+    let sxy = 0;
+    for (let i = 0; i < n; i++) { sxx += (xs[i] - mx) ** 2; sxy += (xs[i] - mx) * (ys[i] - my); }
+    const a = sxx > 0 ? sxy / sxx : 0;
+    const c = my - a * mx;
+    const xHeight = median(r.ws.map((wd) => wd.xh));
+    const mid = a * 0.5 * (r.x0 + r.x1) + c;
+    const pts = r.ws.reduce((s, wd) => s + wd.xs.length, 0);
+    return { id, a, c, curve: r.curve, xHeight, x0: r.x0, x1: r.x1, points: pts, inliers: pts, partial: mid - 1.15 * xHeight < 0 || mid + 0.35 * xHeight > H };
+  });
+  lines.sort((p, q) => p.c - q.c);
+  lines.forEach((l, i) => (l.id = i));
+  void W;
+  return lines;
 }
 
 export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
@@ -535,6 +678,10 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
       return { a, c: p0.y - a * p0.x };
     });
   }
+  // The neural detector, when present, wins: its rows follow the text word by word, while the fit above
+  // can only offer one straight line per row. Without the model the ruling/text analysis still works.
+  const fromWords = opts.words?.length ? linesFromWords(opts.words, W, H, opts.debug) : [];
+  const outLines = fromWords.length >= 2 ? fromWords : lines;
   const pxPerMm = ruling && ruling.squared ? ruling.pitch / 5 : null;
   return {
     width: W,
@@ -545,7 +692,7 @@ export function analyzePage(img: RGBA, opts: PageOptions = {}): PageAnalysis {
     strokeWidth: sw / sc,
     xHeight: xhPage / sc,
     inkLevel: m0.inkLevel,
-    lines,
+    lines: outLines,
     sheet: sheet ? { data: sheet, width: w, height: h, scale: sc } : null,
   };
 }

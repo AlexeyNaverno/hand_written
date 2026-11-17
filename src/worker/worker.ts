@@ -8,6 +8,7 @@ import { loadCV } from '../core/cv';
 import * as cvx from '../core/cv';
 import { parseStem } from '../core/charset';
 import { agrees, analyzeImage, extractLine, ImageAnalysis, normalizeGlyph } from '../core/harvest';
+import { detectWords, DetSession } from '../core/analyze/detect';
 import { Glyph, upgradeLegacy } from '../core/library';
 import { CtcRecognizer } from '../core/ocr/ctc';
 import { PdfImage, PdfRule, PdfWriter } from '../core/pdf';
@@ -18,6 +19,7 @@ import type { CheckItem, Commands, LineInfo, Paper, Request, Response } from './
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 let ocr: CtcRecognizer | null = null;
+let det: DetSession | null = null;
 let image: RGBA | null = null;
 let imageName = '';
 let analysis: ImageAnalysis | null = null;
@@ -94,24 +96,44 @@ const handlers: { [C in keyof Commands]: Handler<C> } = {
     return { result: { ok: true } };
   },
 
-  async loadOcr({ urls, ortPath, keep }, progress) {
+  async loadOcr({ urls, detUrls, ortPath, keep }, progress) {
     // only the .wasm file is fetched; the JavaScript part of the runtime is inside the bundle
     ort.env.wasm.wasmPaths = { wasm: `${ortPath}ort-wasm-simd-threaded.wasm` };
     ort.env.wasm.numThreads = 1;
+    let source = '';
     for (const url of urls) {
       const bytes = await fetchModel(url, progress, keep);
       if (!bytes) continue;
       const session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
       ocr = new CtcRecognizer(ort as never, session as never);
-      return { result: { source: url } };
+      source = url;
+      break;
     }
-    throw new Error('Модель распознавания не найдена. Нужен файл models/ocr_model.onnx рядом с программой или доступ в интернет при первом запуске.');
+    if (!source) throw new Error('Модель распознавания не найдена. Нужен файл models/ocr_model.onnx рядом с программой или доступ в интернет при первом запуске.');
+    // the row detector is optional: without it the rows come from the ruling and the text bands
+    for (const url of detUrls ?? []) {
+      const bytes = await fetchModel(url, progress, keep);
+      if (!bytes) continue;
+      try {
+        det = (await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] })) as never;
+      } catch {
+        det = null;
+      }
+      break;
+    }
+    return { result: { source } };
   },
 
   async analyze({ rgba, width, height, name }, progress) {
     image = { width, height, data: rgba };
     imageName = name;
-    analysis = await analyzeImage(image, ocr ?? undefined, (d, t) => progress(d, t, 'строки'));
+    let words;
+    if (det) {
+      progress(0, 1, 'строки: нейросеть ищет слова');
+      words = await detectWords(det, (d, dims) => new ort.Tensor('float32', d, dims), image);
+      progress(1, 1, 'строки: нейросеть ищет слова');
+    }
+    analysis = await analyzeImage(image, ocr ?? undefined, (d, t) => progress(d, t, 'строки'), words);
     const lines: LineInfo[] = [];
     const transfer: Transferable[] = [];
     analysis.lines.forEach((la, index) => {

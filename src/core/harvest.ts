@@ -8,7 +8,7 @@ import * as cv from './cv';
 import { alignText, CharPlace } from './analyze/align';
 import { extractGlyphs } from './analyze/glyph';
 import { analyzeLine, LineAnalysis } from './analyze/line';
-import { analyzePage, PageAnalysis } from './analyze/page';
+import { analyzePage, PageAnalysis, WordBand } from './analyze/page';
 import { isJoining } from './charset';
 import { Glyph, Joint } from './library';
 import { CtcRecognizer } from './ocr/ctc';
@@ -19,8 +19,8 @@ export interface ImageAnalysis {
   lines: LineAnalysis[];
 }
 
-export async function analyzeImage(img: RGBA, ocr?: CtcRecognizer, onProgress?: (done: number, total: number) => void): Promise<ImageAnalysis> {
-  const page = analyzePage(img);
+export async function analyzeImage(img: RGBA, ocr?: CtcRecognizer, onProgress?: (done: number, total: number) => void, words?: WordBand[]): Promise<ImageAnalysis> {
+  const page = analyzePage(img, words && words.length ? { words } : {});
   const usable = page.lines.filter((l) => !l.partial);
   const lines: LineAnalysis[] = [];
   for (let i = 0; i < usable.length; i++) {
