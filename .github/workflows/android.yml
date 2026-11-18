@@ -68,19 +68,22 @@ jobs:
         with:
           name: pocherk-apk-${{ steps.android-config.outputs.signed == 'true' && 'signed' || 'debug' }}
           path: pocherk.apk
-      - name: Publish update-safe APK as a pre-release
-        if: steps.android-config.outputs.signed == 'true'
+      - name: Publish versioned APK release or latest main pre-release
+        if: ${{ steps.android-config.outputs.signed == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: apk-latest
-          name: 'Почерк для Android: последняя сборка'
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'apk-latest' }}
+          name: "${{ startsWith(github.ref, 'refs/tags/v') && format('Почерк для Android {0}', github.ref_name) || 'Почерк для Android: последняя сборка' }}"
           prerelease: true
           make_latest: false
           files: pocherk.apk
           body: |
-            Автоматическая сборка из ветки `${{ github.ref_name }}` (коммит ${{ github.sha }}), версия ${{ steps.android-config.outputs.versionCode }}.
+            Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
             APK подписан постоянным ключом проекта; обновление поверх предыдущей release-версии сохраняет локальную библиотеку.
             Скачайте `pocherk.apk` на телефон и откройте его; Android попросит разрешить установку из этого источника.
       - name: Explain why the public release was not replaced
         if: steps.android-config.outputs.signed != 'true'
         run: echo 'APK built as a CI debug artifact only. Configure the four ANDROID_* signing secrets before publishing an update-safe APK.'
+      - name: Keep signed branch builds as artifacts until merged or tagged
+        if: ${{ steps.android-config.outputs.signed == 'true' && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') }}
+        run: echo 'Signed APK artifact created, but only main and version tags publish releases.'
