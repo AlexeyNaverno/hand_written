@@ -1,4 +1,84 @@
+import { pruneSpurs, thin } from './imgops';
 import { clamp } from './types';
+
+export type Quad = [[number, number], [number, number], [number, number], [number, number]];
+export interface RectifiedPage { rgba: Uint8Array; width: number; height: number }
+export interface VectorStroke { points: [number, number][] }
+export interface GlyphVector {
+  schema: 1;
+  method: 'skeleton-trace';
+  /** Pen order cannot be inferred from one raster image. */
+  direction: 'unknown';
+  confidence: number;
+  strokes: VectorStroke[];
+}
+
+/** Trace the raster's thinned centreline into ordered polylines; this is an editable-quality starting point, not pen order. */
+export function vectorizeGlyph(rgba: Uint8Array, w: number, h: number): GlyphVector {
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < mask.length; i++) mask[i] = rgba[4 * i + 3] >= 48 ? 1 : 0;
+  const sk = pruneSpurs(thin(mask, w, h), w, h, 2, 1);
+  const links = (i: number) => {
+    const x = i % w, y = Math.floor(i / w), out: number[] = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h || !sk[ny * w + nx]) continue;
+      // Suppress diagonal corner shortcuts when an orthogonal connection exists.
+      if (dx && dy && (sk[y * w + nx] || sk[ny * w + x])) continue;
+      out.push(ny * w + nx);
+    }
+    return out;
+  };
+  const degree = new Uint8Array(sk.length);
+  const active: number[] = [];
+  for (let i = 0; i < sk.length; i++) if (sk[i]) { active.push(i); degree[i] = links(i).length; }
+  const visited = new Set<string>();
+  const edge = (a: number, b: number) => a < b ? `${a}:${b}` : `${b}:${a}`;
+  const strokes: VectorStroke[] = [];
+  const trace = (start: number, next: number) => {
+    const path = [start];
+    let prev = start, cur = next;
+    visited.add(edge(prev, cur)); path.push(cur);
+    for (let steps = 0; steps < sk.length; steps++) {
+      if (degree[cur] !== 2) break;
+      const n = links(cur).find((q) => q !== prev && !visited.has(edge(cur, q)));
+      if (n === undefined) break;
+      visited.add(edge(cur, n)); prev = cur; cur = n; path.push(cur);
+      if (cur === start) break;
+    }
+    if (path.length >= 2) strokes.push({ points: path.map((i) => [i % w, Math.floor(i / w)] as [number, number]) });
+  };
+  // Branches and ends delimit stable path segments.
+  for (const i of active) if (degree[i] !== 2) for (const n of links(i)) if (!visited.has(edge(i, n))) trace(i, n);
+  // Remaining degree-two components are closed loops.
+  for (const i of active) for (const n of links(i)) if (!visited.has(edge(i, n))) trace(i, n);
+  strokes.sort((a, b) => {
+    const pa = a.points[0], pb = b.points[0];
+    return pa[1] - pb[1] || pa[0] - pb[0];
+  });
+  return { schema: 1, method: 'skeleton-trace', direction: 'unknown', confidence: strokes.length ? 0.3 : 0, strokes };
+}
+
+/** Warp a normalized TL, TR, BR, BL quadrilateral to its front-facing rectangular raster. */
+export async function rectifyQuad(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, quad: Quad, maxSide = 2400): Promise<RectifiedPage> {
+  if (rgba.length !== w * h * 4 || w < 2 || h < 2 || !Number.isFinite(maxSide) || maxSide < 2) throw new Error('Invalid image dimensions');
+  if (quad.some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1)) throw new Error('Corners must be normalized image coordinates');
+  const cross = (a: number[], b: number[], c: number[]) => (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+  const turns = quad.map((p, i) => cross(p, quad[(i + 1) % 4], quad[(i + 2) % 4]));
+  if (turns.some((v) => Math.abs(v) < 1e-6) || !(turns.every((v) => v > 0) || turns.every((v) => v < 0))) throw new Error('Corners must form a convex, non-crossing quadrilateral in TL, TR, BR, BL order');
+  const distance = (a: number[], b: number[]) => Math.hypot((a[0] - b[0]) * w, (a[1] - b[1]) * h);
+  const outW = Math.max(distance(quad[0], quad[1]), distance(quad[3], quad[2]));
+  const outH = Math.max(distance(quad[0], quad[3]), distance(quad[1], quad[2]));
+  if (outW < 2 || outH < 2) throw new Error('The selected area is too small');
+  const scale = Math.min(1, maxSide / Math.max(outW, outH));
+  const width = Math.max(2, Math.round(outW * scale));
+  const height = Math.max(2, Math.round(outH * scale));
+  const source: [number, number][] = quad.map(([x, y]) => [x * (w - 1), y * (h - 1)]);
+  const cv = await import('./cv');
+  await cv.loadCV();
+  return { rgba: cv.warpPerspectiveRGBA(rgba, w, h, source, width, height), width, height };
+}
 
 export interface TrimmedCell {
   rgba: Uint8Array;
