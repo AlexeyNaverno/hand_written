@@ -6,14 +6,12 @@ import { Library } from './Library';
 import { isNative } from './platform';
 import { call } from './rpc';
 import { Write } from './Write';
+import { Worksheet } from './Worksheet';
 
 type Tab = 'harvest' | 'library' | 'write';
 
-/** Where the recogniser model is looked for: next to the app first, then the public copy on Hugging Face. */
-const MODEL_URLS = [
-  new URL('./models/ocr_model.onnx', document.baseURI).href,
-  'https://huggingface.co/ai-forever/ReadingPipeline-notebooks/resolve/main/ocr/ocr_model.onnx',
-];
+/** OCR model is bundled beside the app; runtime never contacts a model host. */
+const MODEL_URLS = [new URL('./models/ocr_model.onnx', document.baseURI).href];
 /** The row detector ships with the app; without it the rows fall back to the ruling and text bands. */
 const DET_URLS = [new URL('./models/det_model.onnx', document.baseURI).href];
 
@@ -84,7 +82,10 @@ export function App() {
       </nav>
       <main>
         {ocr.state === 'error' && tab === 'harvest' && <p className="warn">{ocr.note}</p>}
-        <div hidden={tab !== 'harvest'}><Harvest glyphs={glyphs} setGlyphs={setGlyphs} ocrReady={ocr.state === 'ready'} /></div>
+        <div hidden={tab !== 'harvest'}>
+          <Worksheet glyphs={glyphs} setGlyphs={setGlyphs} ocrReady={ocr.state === 'ready'} />
+          <details className="card"><summary>Автоматически разобрать обычную рукописную страницу (экспериментально)</summary><Harvest glyphs={glyphs} setGlyphs={setGlyphs} ocrReady={ocr.state === 'ready'} /></details>
+        </div>
         <div hidden={tab !== 'library'}><Library glyphs={glyphs} setGlyphs={setGlyphs} /></div>
         <div hidden={tab !== 'write'}><Write glyphs={glyphs} syncLibrary={syncLibrary} ocrReady={ocr.state === 'ready'} /></div>
       </main>

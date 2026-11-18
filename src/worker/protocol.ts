@@ -48,6 +48,8 @@ export interface Commands {
   /** `keep`: store the downloaded model in the browser cache for offline use (not needed inside the Android app). */
   loadOcr: { args: { urls: string[]; detUrls: string[]; ortPath: string; keep: boolean }; result: { source: string } };
   analyze: { args: { rgba: Uint8Array; width: number; height: number; name: string }; result: AnalyzeResult };
+  /** Read a single isolated cell locally; an empty result leaves the symbol for the user to enter. */
+  readCell: { args: { rgba: Uint8Array; width: number; height: number }; result: { text: string; confidence: number } };
   extract: { args: { line: number; text: string; widths: [string, number][] }; result: { glyphs: { meta: GlyphMeta; png: Uint8Array }[] } };
   setLibrary: { args: { glyphs: StoredGlyph[] }; result: { count: number } };
   importPng: { args: { png: Uint8Array; json: string | null; stem: string }; result: { meta: GlyphMeta; png: Uint8Array } | null };

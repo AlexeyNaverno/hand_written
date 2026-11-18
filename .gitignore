@@ -4,10 +4,6 @@ local/
 *.log
 .DS_Store
 relay_out/
-android/app/build/
-android/build/
-android/.gradle/
-android/local.properties
-android/app/src/main/assets/public/
+android/
 public/models/*.onnx
 public/ort/
