@@ -25,5 +25,5 @@ if (signed) {
   build += `\n\n// Private signing key is injected from GitHub Actions secrets; never commit the keystore.\nandroid {\n    signingConfigs {\n        release {\n            storeFile file("release-key.jks")\n            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")\n            keyAlias System.getenv("ANDROID_KEY_ALIAS")\n            keyPassword System.getenv("ANDROID_KEY_PASSWORD")\n        }\n    }\n    buildTypes {\n        release { signingConfig signingConfigs.release }\n    }\n}\n`;
 }
 await writeFile(gradle, build);
-if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `signed=${signed}\nversionCode=${versionCode}\n`);
+if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `signed=${signed}\nversionCode=${versionCode}\nversionName=${versionName}\n`);
 console.log(`Android setup complete; release signing ${signed ? 'configured' : 'not configured'}; versionCode ${versionCode}.`);
