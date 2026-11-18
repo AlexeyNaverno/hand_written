@@ -109,7 +109,7 @@ const handlers: { [C in keyof Commands]: Handler<C> } = {
       source = url;
       break;
     }
-    if (!source) throw new Error('Модель распознавания не найдена. Нужен файл models/ocr_model.onnx рядом с программой или доступ в интернет при первом запуске.');
+    if (!source) throw new Error('Не найдена встроенная локальная модель models/ocr_model.onnx. Положите её в public/models и пересоберите приложение командой npm run model. Сетевые загрузки во время работы отключены.');
     // the row detector is optional: without it the rows come from the ruling and the text bands
     for (const url of detUrls ?? []) {
       const bytes = await fetchModel(url, progress, keep);
@@ -122,6 +122,12 @@ const handlers: { [C in keyof Commands]: Handler<C> } = {
       break;
     }
     return { result: { source } };
+  },
+
+  async readCell({ rgba, width, height }) {
+    if (!ocr) return { result: { text: '', confidence: 0 } };
+    const reading = await ocr.read(rgba, width, height);
+    return { result: { text: reading.text.trim(), confidence: reading.confidence } };
   },
 
   async analyze({ rgba, width, height, name }, progress) {

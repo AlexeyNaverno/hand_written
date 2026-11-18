@@ -10,6 +10,7 @@ import { ransacLine, thin } from '../src/core/imgops';
 import { upgradeLegacy } from '../src/core/library';
 import { PdfWriter } from '../src/core/pdf';
 import { decodePng, encodePng } from '../src/core/png';
+import { trimInkCell, whitePaper } from '../src/core/worksheet';
 import { layoutText, parseParagraphs, renderLine } from '../src/core/synth/engine';
 import { DEFAULT_OPTIONS } from '../src/core/synth/options';
 import { drawGlyph, tinyLibrary } from './helpers';
@@ -312,5 +313,26 @@ describe('rows from the neural word detector', () => {
     const wavy = bottoms(extractStrip(img, mk(false) as never, mk(false).lines[0]));
     expect(level).toBeLessThan(0.3 * xh * 4); // in strip pixels, scale ≤ 4
     expect(level).toBeLessThan(wavy / 3);
+  });
+});
+
+describe('manual worksheet cells', () => {
+  it('trims one ink cell to transparent glyph bounds and supplies white OCR pixels', () => {
+    const w = 32, h = 36;
+    const pixels = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) { pixels[4 * i] = 250; pixels[4 * i + 1] = 249; pixels[4 * i + 2] = 246; pixels[4 * i + 3] = 255; }
+    const ink = (x: number, y: number) => { const i = 4 * (y * w + x); pixels[i] = 25; pixels[i + 1] = 40; pixels[i + 2] = 115; };
+    for (let y = 7; y <= 27; y++) ink(15, y);
+    for (let x = 9; x <= 21; x++) ink(x, 7);
+    const cell = trimInkCell(pixels, w, h)!;
+    expect(cell.bbox[2] - cell.bbox[0]).toBe(13);
+    expect(cell.bbox[3] - cell.bbox[1]).toBe(21);
+    expect(cell.width).toBeGreaterThan(13);
+    expect(cell.rgba[3]).toBe(0);
+    expect(cell.rgba[4 * (cell.bbox[1] * cell.width + cell.bbox[0]) + 3]).toBeGreaterThan(0);
+    const ocr = whitePaper(cell.rgba);
+    expect(ocr[3]).toBe(255);
+    expect(ocr[0]).toBe(255);
+    expect(trimInkCell(new Uint8Array(4 * 8 * 8).fill(255), 8, 8)).toBeNull();
   });
 });

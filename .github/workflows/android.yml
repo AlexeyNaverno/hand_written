@@ -38,15 +38,38 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
-      - name: Build the APK
+      - name: Configure camera, version and persistent APK signing
+        id: android-config
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: node tools/configure-android.mjs
+      - name: Build update-safe signed APK
+        if: steps.android-config.outputs.signed == 'true'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon --console=plain
+      - name: Build debug APK while release signing is not configured
+        if: steps.android-config.outputs.signed != 'true'
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon --console=plain
-      - run: cp android/app/build/outputs/apk/debug/app-debug.apk pocherk.apk && ls -la pocherk.apk
+      - name: Collect release-signed APK
+        if: steps.android-config.outputs.signed == 'true'
+        run: cp android/app/build/outputs/apk/release/app-release.apk pocherk.apk && ls -la pocherk.apk
+      - name: Collect debug APK (not suitable for update installs)
+        if: steps.android-config.outputs.signed != 'true'
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk pocherk.apk && ls -la pocherk.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: pocherk-apk
+          name: pocherk-apk-${{ steps.android-config.outputs.signed == 'true' && 'signed' || 'debug' }}
           path: pocherk.apk
-      - name: Publish as a pre-release
+      - name: Publish update-safe APK as a pre-release
+        if: steps.android-config.outputs.signed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-latest
@@ -55,6 +78,9 @@ jobs:
           make_latest: false
           files: pocherk.apk
           body: |
-            Автоматическая сборка из ветки `${{ github.ref_name }}` (коммит ${{ github.sha }}).
+            Автоматическая сборка из ветки `${{ github.ref_name }}` (коммит ${{ github.sha }}), версия ${{ steps.android-config.outputs.versionCode }}.
+            APK подписан постоянным ключом проекта; обновление поверх предыдущей release-версии сохраняет локальную библиотеку.
             Скачайте `pocherk.apk` на телефон и откройте его; Android попросит разрешить установку из этого источника.
-            Сборка отладочная (подписана отладочным ключом), работает без интернета.
+      - name: Explain why the public release was not replaced
+        if: steps.android-config.outputs.signed != 'true'
+        run: echo 'APK built as a CI debug artifact only. Configure the four ANDROID_* signing secrets before publishing an update-safe APK.'
