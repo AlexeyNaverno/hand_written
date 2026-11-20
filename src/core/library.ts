@@ -4,6 +4,7 @@
  * what is needed for joined writing.
  */
 import { JoinLevel, entryLevel, exitLevel, isJoining, isUpper } from './charset';
+import type { GlyphVector } from './worksheet';
 
 export interface Joint {
   /** cut = measured on a real connecting stroke; end = natural stroke end; virtual = assigned by rule. */
@@ -44,6 +45,8 @@ export interface GlyphMeta {
   exit: Joint | null;
   left_joint?: [number, number];
   right_joint?: [number, number];
+  /** Low-confidence raster skeleton polylines; point order within a line is topological, not pen direction. */
+  vector?: GlyphVector;
   source: { file: string; line: number; index: number; px_per_mm: number | null };
   /** cost: alignment cost; auto: accepted without the user; read/p: what the recogniser read in the cut-out letter. */
   quality: { cost: number; auto: boolean; read?: string; p?: number };

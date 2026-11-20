@@ -4,7 +4,7 @@ import * as pdfjs from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { entryLevel, exitLevel, isJoining } from '../core/charset';
 import { encodePng } from '../core/png';
-import { trimInkCell, whitePaper } from '../core/worksheet';
+import { rectifyQuad, trimInkCell, vectorizeGlyph, whitePaper } from '../core/worksheet';
 import type { GlyphMeta, Joint } from '../core/library';
 import type { StoredGlyph } from '../worker/protocol';
 import { dbPutMany, newId } from './db';
@@ -14,6 +14,7 @@ import { call } from './rpc';
 (pdfjs as unknown as { GlobalWorkerOptions: { workerSrc: string } }).GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type Bounds = { x0: number; y0: number; x1: number; y1: number };
+type Quad = [[number, number], [number, number], [number, number], [number, number]];
 type Side = 'entry' | 'exit';
 type Pair = { p0: [number, number] | null; p1: [number, number] | null };
 interface PreparedCell {
@@ -30,6 +31,7 @@ interface PreparedCell {
 }
 
 const INITIAL_BOUNDS: Bounds = { x0: .025, y0: .025, x1: .975, y1: .975 };
+const INITIAL_QUAD: Quad = [[.025, .025], [.975, .025], [.975, .975], [.025, .975]];
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Cut one cell, remove paper colour, trim to the ink, and normalise lowercase ink height to 64 px. */
@@ -136,6 +138,8 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
   const [rows, setRows] = useState(10);
   const [cols, setCols] = useState(10);
   const [bounds, setBounds] = useState<Bounds>(INITIAL_BOUNDS);
+  const [corners, setCorners] = useState<Quad>(INITIAL_QUAD);
+  const [rectified, setRectified] = useState(false);
   const [inset, setInset] = useState(8);
   const [cells, setCells] = useState<PreparedCell[]>([]);
   const [active, setActive] = useState<number | null>(null);
@@ -159,12 +163,16 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(source, 0, 0);
     ctx.strokeStyle = 'rgba(20,115,210,.9)'; ctx.lineWidth = Math.max(1.5, source.width / 1000);
-    for (let i = 0; i <= cols; i++) { const x = (bounds.x0 + (bounds.x1 - bounds.x0) * i / cols) * source.width; ctx.beginPath(); ctx.moveTo(x, bounds.y0 * source.height); ctx.lineTo(x, bounds.y1 * source.height); ctx.stroke(); }
-    for (let i = 0; i <= rows; i++) { const y = (bounds.y0 + (bounds.y1 - bounds.y0) * i / rows) * source.height; ctx.beginPath(); ctx.moveTo(bounds.x0 * source.width, y); ctx.lineTo(bounds.x1 * source.width, y); ctx.stroke(); }
-    const corners: [number, number][] = [[bounds.x0, bounds.y0], [bounds.x1, bounds.y0], [bounds.x1, bounds.y1], [bounds.x0, bounds.y1]];
+    const point = (u: number, v: number): [number, number] => {
+      const [tl, tr, br, bl] = corners;
+      return [tl[0] * (1-u) * (1-v) + tr[0] * u * (1-v) + br[0] * u * v + bl[0] * (1-u) * v,
+        tl[1] * (1-u) * (1-v) + tr[1] * u * (1-v) + br[1] * u * v + bl[1] * (1-u) * v];
+    };
+    for (let i = 0; i <= cols; i++) { const u = i / cols, a = point(u, 0), b = point(u, 1); ctx.beginPath(); ctx.moveTo(a[0] * source.width, a[1] * source.height); ctx.lineTo(b[0] * source.width, b[1] * source.height); ctx.stroke(); }
+    for (let i = 0; i <= rows; i++) { const v = i / rows, a = point(0, v), b = point(1, v); ctx.beginPath(); ctx.moveTo(a[0] * source.width, a[1] * source.height); ctx.lineTo(b[0] * source.width, b[1] * source.height); ctx.stroke(); }
     ctx.fillStyle = '#e43b32';
     for (const [x, y] of corners) { ctx.beginPath(); ctx.arc(x * source.width, y * source.height, Math.max(9, source.width / 90), 0, Math.PI * 2); ctx.fill(); }
-  }, [source, rows, cols, bounds]);
+  }, [source, rows, cols, corners]);
 
   useEffect(() => () => { streamRef.current?.getTracks().forEach((t) => t.stop()); }, []);
   useEffect(() => {
@@ -185,7 +193,7 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
     const f = Math.min(1, 2400 / Math.max(video.videoWidth, video.videoHeight));
     const c = document.createElement('canvas'); c.width = Math.round(video.videoWidth * f); c.height = Math.round(video.videoHeight * f);
     c.getContext('2d')!.drawImage(video, 0, 0, c.width, c.height);
-    setName('камера'); setSource(c); setBounds(INITIAL_BOUNDS); setCells([]); setMessage('Кадр получен. Потяните четыре красные точки по углам области клеток.'); closeCamera();
+    setName('камера'); setSource(c); setBounds(INITIAL_BOUNDS); setCorners(INITIAL_QUAD); setRectified(false); setCells([]); setMessage('Кадр получен. Потяните четыре красные точки по углам области клеток.'); closeCamera();
   }
 
   async function loadFile(file?: File) {
@@ -203,7 +211,7 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
         canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height;
         canvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(img.rgba), img.width, img.height), 0, 0);
       }
-      setName(file.name); setSource(canvas); setBounds(INITIAL_BOUNDS);
+      setName(file.name); setSource(canvas); setBounds(INITIAL_BOUNDS); setCorners(INITIAL_QUAD); setRectified(false);
       setMessage('Подвиньте красные углы к границам сетки. Сетка здесь — подсказка поверх снимка, файл не изменяется.');
     } catch (e) { setMessage(`Не удалось открыть файл: ${e instanceof Error ? e.message : String(e)}`); }
     finally { setBusy(''); }
@@ -214,7 +222,7 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
     if (!doc) return;
     const n = clamp(Math.round(page), 1, doc.numPages);
     setBusy(`страница PDF ${n}…`);
-    try { setSource(await renderPdfPage(doc, n)); setPdfPage(n); setCells([]); setBounds(INITIAL_BOUNDS); }
+    try { setSource(await renderPdfPage(doc, n)); setPdfPage(n); setCells([]); setBounds(INITIAL_BOUNDS); setCorners(INITIAL_QUAD); setRectified(false); }
     catch (e) { setMessage(`Не удалось отрисовать страницу: ${String(e)}`); }
     finally { setBusy(''); }
   }
@@ -224,26 +232,36 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
     return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
   }
   function startDrag(e: PointerEvent<HTMLCanvasElement>) {
-    if (!source) return;
+    if (!source || rectified) return;
     const p = pointerPoint(e);
     const rect = e.currentTarget.getBoundingClientRect();
-    const points: [number, number][] = [[bounds.x0, bounds.y0], [bounds.x1, bounds.y0], [bounds.x1, bounds.y1], [bounds.x0, bounds.y1]];
-    const d = points.map(([x, y]) => Math.hypot((x - p.x) * rect.width, (y - p.y) * rect.height));
+    const d = corners.map(([x, y]) => Math.hypot((x - p.x) * rect.width, (y - p.y) * rect.height));
     const nearest = Math.min(...d);
     if (nearest < 32) { dragRef.current = d.indexOf(nearest); e.currentTarget.setPointerCapture(e.pointerId); }
   }
   function moveDrag(e: PointerEvent<HTMLCanvasElement>) {
     if (dragRef.current === null || !source) return;
     const p = pointerPoint(e), n = dragRef.current;
-    setBounds((b) => {
-      const x = clamp(p.x, .01, .99), y = clamp(p.y, .01, .99);
-      const next = { ...b };
-      if (n === 0) { next.x0 = Math.min(x, b.x1 - .08); next.y0 = Math.min(y, b.y1 - .08); }
-      if (n === 1) { next.x1 = Math.max(x, b.x0 + .08); next.y0 = Math.min(y, b.y1 - .08); }
-      if (n === 2) { next.x1 = Math.max(x, b.x0 + .08); next.y1 = Math.max(y, b.y0 + .08); }
-      if (n === 3) { next.x0 = Math.min(x, b.x1 - .08); next.y1 = Math.max(y, b.y0 + .08); }
+    setCorners((old) => {
+      const next = old.map((point) => [...point]) as Quad;
+      next[n] = [clamp(p.x, .005, .995), clamp(p.y, .005, .995)];
       return next;
     });
+  }
+
+  async function rectifyGrid() {
+    if (!source) return;
+    setBusy('выпрямление перспективы…');
+    try {
+      const ctx = source.getContext('2d', { willReadFrequently: true })!;
+      const image = ctx.getImageData(0, 0, source.width, source.height);
+      const page = await rectifyQuad(image.data, source.width, source.height, corners);
+      const canvas = document.createElement('canvas'); canvas.width = page.width; canvas.height = page.height;
+      canvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(page.rgba), page.width, page.height), 0, 0);
+      setSource(canvas); setBounds({ x0: 0, y0: 0, x1: 1, y1: 1 }); setCorners([[0, 0], [1, 0], [1, 1], [0, 1]]); setRectified(true); setCells([]);
+      setMessage(`Область выпрямлена перспективно: ${page.width} × ${page.height}. Теперь разметьте клетки и нажмите «Найти клетки».`);
+    } catch (e) { setMessage(`Не удалось выпрямить область: ${e instanceof Error ? e.message : String(e)}`); }
+    finally { setBusy(''); }
   }
 
   async function buildCells() {
@@ -298,6 +316,7 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
       schema: 2, id, char: chars[0], variant, position: 'isolated', prev: '', next: '', width: c.width, height: c.height,
       bbox: c.bbox, baseline: clamp(baseline, 0, c.height), x_height: clamp(xHeight, 1, c.height), stroke_width: Math.max(1.5, xHeight / 10), slant: 0, ink_rgb: [32, 43, 86],
       entry, exit, left_joint: entry?.p0, right_joint: exit?.p0,
+      vector: vectorizeGlyph(c.rgba, c.width, c.height),
       source: { file: name, line: c.row, index: c.col, px_per_mm: null },
       quality: { cost: 0, auto: false, read: c.char, p: c.confidence }, enabled: true, checked_by_user: true,
     };
@@ -316,7 +335,7 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
       const id = newId();
       const variant = (counters.get(c.char) ?? 0) + 1; counters.set(c.char, variant);
       const xh = Math.max(12, c.bbox[3] - c.bbox[1]);
-      const meta: GlyphMeta = { schema: 2, id, char: c.char, variant, position: 'isolated', prev: '', next: '', width: c.width, height: c.height, bbox: c.bbox, baseline: c.bbox[3], x_height: xh, stroke_width: Math.max(1.5, xh / 10), slant: 0, ink_rgb: [32, 43, 86], entry: null, exit: null, source: { file: name, line: c.row, index: c.col, px_per_mm: null }, quality: { cost: 0, auto: false, read: c.char, p: c.confidence }, enabled: true, checked_by_user: true };
+      const meta: GlyphMeta = { schema: 2, id, char: c.char, variant, position: 'isolated', prev: '', next: '', width: c.width, height: c.height, bbox: c.bbox, baseline: c.bbox[3], x_height: xh, stroke_width: Math.max(1.5, xh / 10), slant: 0, ink_rgb: [32, 43, 86], entry: null, exit: null, vector: vectorizeGlyph(c.rgba, c.width, c.height), source: { file: name, line: c.row, index: c.col, px_per_mm: null }, quality: { cost: 0, auto: false, read: c.char, p: c.confidence }, enabled: true, checked_by_user: true };
       return { id, meta, png: encodePng(c.rgba, c.width, c.height) };
     });
     await dbPutMany(items); setGlyphs([...glyphs, ...items]);
@@ -345,7 +364,7 @@ export function Worksheet({ glyphs, setGlyphs, ocrReady }: { glyphs: StoredGlyph
       <p className="meta">Обычно 10×10; число строк и столбцов можно менять. Синие линии показывают клетки, красные углы передвигаются касанием. Отступ помогает не захватить напечатанные линии.</p>
       {source && <>
         <div className="worksheet-preview"><canvas ref={displayRef} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }} /></div>
-        <div className="row wrap"><button className="btn primary" disabled={!!busy} onClick={() => void buildCells()}>Распознать клетки локально</button><button className="btn" onClick={() => void saveGridPreview()}>Сохранить превью с сеткой</button></div>
+        <div className="row wrap">{!rectified && <button className="btn primary" disabled={!!busy} onClick={rectifyGrid}>Выпрямить перспективу по четырём углам</button>}<button className="btn primary" disabled={!!busy || !rectified} onClick={() => void buildCells()}>Распознать клетки локально</button><button className="btn" onClick={() => void saveGridPreview()}>Сохранить превью с сеткой</button></div>
       </>}
       {busy && <p className="busy">{busy}</p>}{message && <p className="meta">{message}</p>}
     </div>

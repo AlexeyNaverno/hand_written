@@ -81,9 +81,23 @@ jobs:
             Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
             APK подписан постоянным ключом проекта; обновление поверх предыдущей release-версии сохраняет локальную библиотеку.
             Скачайте `pocherk.apk` на телефон и откройте его; Android попросит разрешить установку из этого источника.
-      - name: Explain why the public release was not replaced
+      - name: Publish tagged APK as a debug-signed pre-release when no persistent key exists
+        if: ${{ steps.android-config.outputs.signed != 'true' && startsWith(github.ref, 'refs/tags/v') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "${{ format('Почерк для Android {0} (debug-подпись)', github.ref_name) }}"
+          prerelease: true
+          make_latest: false
+          files: pocherk.apk
+          body: |
+            Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
+            APK собран и подписан временным debug-ключом GitHub Actions, потому что постоянный ключ проекта не настроен.
+            Это пригодная для первой установки сборка, но она НЕ обновляется поверх APK с другим сертификатом и не гарантирует сохранение данных при переустановке.
+            Для update-safe APK настройте ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS и ANDROID_KEY_PASSWORD и повторно запустите workflow.
+      - name: Explain why the public latest release was not replaced
         if: steps.android-config.outputs.signed != 'true'
-        run: echo 'APK built as a CI debug artifact only. Configure the four ANDROID_* signing secrets before publishing an update-safe APK.'
+        run: echo 'APK built as a CI debug artifact; only a version tag publishes a debug-signed release. Configure the four ANDROID_* signing secrets for update-safe releases.'
       - name: Keep signed branch builds as artifacts until merged or tagged
         if: ${{ steps.android-config.outputs.signed == 'true' && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') }}
         run: echo 'Signed APK artifact created, but only main and version tags publish releases.'

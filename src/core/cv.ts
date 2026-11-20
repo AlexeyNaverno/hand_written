@@ -140,6 +140,31 @@ export function warp<T extends Uint8Array | Float32Array>(
   });
 }
 
+/** Perspective transform from four source points (TL, TR, BR, BL) to a rectangle. */
+export function warpPerspectiveRGBA(
+  src: Uint8Array | Uint8ClampedArray,
+  w: number,
+  h: number,
+  source: [number, number][],
+  nw: number,
+  nh: number,
+  border = 255,
+): Uint8Array {
+  if (source.length !== 4) throw new Error('Perspective warp requires four ordered corners');
+  const c = need();
+  const s = c.matFromArray(h, w, c.CV_8UC4, src);
+  const sp = c.matFromArray(4, 1, c.CV_32FC2, Float32Array.from(source.flat()));
+  const dp = c.matFromArray(4, 1, c.CV_32FC2, Float32Array.from([[0, 0], [nw - 1, 0], [nw - 1, nh - 1], [0, nh - 1]].flat()));
+  const m = c.getPerspectiveTransform(sp, dp);
+  const d = new c.Mat();
+  try {
+    c.warpPerspective(s, d, m, new c.Size(nw, nh), c.INTER_LINEAR, c.BORDER_CONSTANT, new c.Scalar(border, border, border, 255));
+    return new Uint8Array(d.data);
+  } finally {
+    s.delete(); sp.delete(); dp.delete(); m.delete(); d.delete();
+  }
+}
+
 export interface Components {
   count: number; // including background label 0
   labels: Int32Array;
