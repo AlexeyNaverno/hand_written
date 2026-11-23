@@ -32,6 +32,7 @@ export function CellCanvas({ char, glyph, displayPx, fieldCells, strokeWidth, sh
       fieldCells,
       showGuides,
       strokeWidth,
+      displayPx,
       path,
       anchors: drawingRef.current ? null : (glyphRef.current?.anchors ?? null),
       selectedAnchor: null,

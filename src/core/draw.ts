@@ -1,11 +1,18 @@
-/** Отрисовка холста: белый фон, направляющие, штрих и анкеры — как в HTML-редакторе. */
+/**
+ * Отрисовка холста: белый фон, направляющие, штрих и анкеры — как в HTML-редакторе.
+ *
+ * Холст в данных всегда 600x600, а на экране он может быть 57 px (15 мм) или больше.
+ * Поэтому толщины линий задаются в ЭКРАННЫХ пикселях и переводятся в логические
+ * через коэффициент s = 600 / displayPx — иначе направляющие при маленьком
+ * экране становятся невидимыми (1 логическая единица = 0,1 px).
+ */
 import { CANVAS_H, CANVAS_W, METRICS, type Anchors, type Point } from './glyph';
 
-export function drawGuides(ctx: CanvasRenderingContext2D, fieldCells: number): void {
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
+export function drawGuides(ctx: CanvasRenderingContext2D, fieldCells: number, s: number): void {
+  ctx.lineWidth = s; // 1 экранный пиксель
+  ctx.setLineDash([6 * s, 6 * s]);
 
-  // сетка поля (клетка × fieldCells)
+  // сетка поля (клетка × fieldCells) — всегда 3×3
   ctx.strokeStyle = '#cce0ff';
   ctx.beginPath();
   for (let i = 1; i < fieldCells; i++) {
@@ -25,7 +32,7 @@ export function drawGuides(ctx: CanvasRenderingContext2D, fieldCells: number): v
   ctx.lineTo(CANVAS_W, METRICS.topLineY);
   ctx.stroke();
 
-  // базовая линия
+  // базовая (нижняя) линия
   ctx.strokeStyle = '#ffb3b3';
   ctx.beginPath();
   ctx.moveTo(0, METRICS.baselineY);
@@ -44,10 +51,10 @@ export function drawGuides(ctx: CanvasRenderingContext2D, fieldCells: number): v
   ctx.setLineDash([]);
 }
 
-export function drawStroke(ctx: CanvasRenderingContext2D, path: Point[], width: number): void {
+export function drawStroke(ctx: CanvasRenderingContext2D, path: Point[], widthLogical: number): void {
   if (path.length < 2) return;
   ctx.strokeStyle = '#000000';
-  ctx.lineWidth = width;
+  ctx.lineWidth = widthLogical;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
@@ -93,7 +100,7 @@ export function setAnchor(anchors: Anchors, key: AnchorKey, p: Point): Anchors {
   return copy;
 }
 
-export function drawAnchors(ctx: CanvasRenderingContext2D, anchors: Anchors, selected: AnchorKey | null): void {
+export function drawAnchors(ctx: CanvasRenderingContext2D, anchors: Anchors, selected: AnchorKey | null, s: number): void {
   const pair = (type: 'entry' | 'exit', color: string) => {
     const main = anchors[type].main;
     const handle = anchors[type].handle;
@@ -101,7 +108,7 @@ export function drawAnchors(ctx: CanvasRenderingContext2D, anchors: Anchors, sel
     const isSelHandle = selected === `${type}Handle`;
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = s;
     ctx.globalAlpha = 0.6;
     ctx.beginPath();
     ctx.moveTo(main.x, main.y);
@@ -111,14 +118,14 @@ export function drawAnchors(ctx: CanvasRenderingContext2D, anchors: Anchors, sel
 
     ctx.fillStyle = isSelMain ? '#4a9eff' : color;
     ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * s;
     ctx.beginPath();
-    ctx.arc(main.x, main.y, isSelMain ? 8 : 6, 0, Math.PI * 2);
+    ctx.arc(main.x, main.y, (isSelMain ? 8 : 6) * s, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
     ctx.fillStyle = isSelHandle ? '#4a9eff' : '#f39c12';
-    const hs = isSelHandle ? 6 : 4;
+    const hs = (isSelHandle ? 6 : 4) * s;
     ctx.fillRect(handle.x - hs, handle.y - hs, hs * 2, hs * 2);
   };
   pair('entry', '#2ecc71');
@@ -130,15 +137,19 @@ export function drawCanvas(
   opts: {
     fieldCells: number;
     showGuides: boolean;
+    /** Толщина штриха в экранных пикселях. */
     strokeWidth: number;
+    /** CSS-размер холста на экране. */
+    displayPx: number;
     path: Point[];
     anchors: Anchors | null;
     selectedAnchor: AnchorKey | null;
   },
 ): void {
+  const s = CANVAS_W / opts.displayPx; // логических единиц на 1 экранный пиксель
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  if (opts.showGuides) drawGuides(ctx, opts.fieldCells);
-  drawStroke(ctx, opts.path, opts.strokeWidth);
-  if (opts.anchors) drawAnchors(ctx, opts.anchors, opts.selectedAnchor);
+  if (opts.showGuides) drawGuides(ctx, opts.fieldCells, s);
+  drawStroke(ctx, opts.path, opts.strokeWidth * s);
+  if (opts.anchors) drawAnchors(ctx, opts.anchors, opts.selectedAnchor, s);
 }

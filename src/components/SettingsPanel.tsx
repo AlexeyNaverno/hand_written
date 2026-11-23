@@ -46,22 +46,13 @@ export function SettingsPanel({ settings, onChange, onResetAll, onClose }: Props
         </div>
 
         <Row
-          label="Размер клетки"
-          value={`${settings.cellMm} мм`}
-          min={3}
-          max={10}
+          label="Размер клетки (минимум 5 мм, поле всегда 3×3)"
+          value={`${settings.cellMm} мм (поле ${field} мм)`}
+          min={5}
+          max={12}
           step={0.5}
           valueNum={settings.cellMm}
           onChange={(v) => set({ cellMm: v })}
-        />
-        <Row
-          label="Клеток по стороне поля"
-          value={`${settings.fieldCells}×${settings.fieldCells} (поле ${field} мм)`}
-          min={2}
-          max={4}
-          step={1}
-          valueNum={settings.fieldCells}
-          onChange={(v) => set({ fieldCells: Math.round(v) })}
         />
         <Row
           label="Клеток на экране по горизонтали"
@@ -82,8 +73,8 @@ export function SettingsPanel({ settings, onChange, onResetAll, onClose }: Props
           onChange={(v) => set({ rows: Math.round(v) })}
         />
         <Row
-          label="Толщина штриха"
-          value={`${settings.strokeWidth}`}
+          label="Толщина штриха на экране"
+          value={`${settings.strokeWidth} px`}
           min={1}
           max={5}
           step={0.5}

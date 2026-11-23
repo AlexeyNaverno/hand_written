@@ -42,6 +42,7 @@ export function AnchorEditor({ glyph, displayPx, fieldCells, strokeWidth, showGu
       fieldCells,
       showGuides,
       strokeWidth,
+      displayPx,
       path: glyph.path,
       anchors: anchorsRef.current,
       selectedAnchor: selectedRef.current,
@@ -70,7 +71,8 @@ export function AnchorEditor({ glyph, displayPx, fieldCells, strokeWidth, showGu
 
   const nearestAnchor = (p: Point): AnchorKey | null => {
     let best: AnchorKey | null = null;
-    let bestDist = 28;
+    // порог касания — 28 экранных пикселей, в логических единицах
+    let bestDist = 28 * (CANVAS_W / displayPx);
     for (const { key } of ANCHOR_LABELS) {
       const a = getAnchor(anchorsRef.current, key);
       const d = Math.hypot(a.x - p.x, a.y - p.y);
