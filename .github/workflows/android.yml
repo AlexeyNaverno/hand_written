@@ -82,3 +82,17 @@ jobs:
           body: |
             Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
             Установите `pocherk.apk` на телефон; обновление поверх предыдущей release-версии сохраняет собранные глифы.
+      - name: Publish tagged APK as a debug-signed pre-release when no persistent key exists
+        if: ${{ steps.android-config.outputs.signed != 'true' && startsWith(github.ref, 'refs/tags/v') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "${{ format('Почерк — буквы {0} (debug-подпись)', github.ref_name) }}"
+          prerelease: true
+          make_latest: false
+          files: pocherk.apk
+          body: |
+            Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
+            APK собран и подписан временным debug-ключом GitHub Actions, потому что постоянный ключ проекта не настроен.
+            Это пригодная для установки сборка, но она НЕ обновляется поверх APK с другим сертификатом и не гарантирует сохранение данных при переустановке.
+            Для update-safe релизов настройте секреты ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS и ANDROID_KEY_PASSWORD (см. README) и перевыпустите тег.
