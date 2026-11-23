@@ -1,12 +1,13 @@
 name: android
 
-# Builds an installable Android package (APK). The web app is wrapped with Capacitor; the recogniser model
-# is packed inside, so the installed app needs no network at all.
+# Собирает Android-приложение (Capacitor). Без секретов подписи — debug APK
+# артефактом Actions; с секретами ANDROID_* — подписанный release APK
+# и публикация в Releases (см. README, раздел «Подпись Android»).
 on:
   push:
     branches: [main, 'arena/**']
     tags: ['v*']
-    paths-ignore: ['**.md', 'tools/ci/**']
+    paths-ignore: ['**.md']
   workflow_dispatch:
 
 permissions:
@@ -31,22 +32,21 @@ jobs:
           distribution: temurin
           java-version: 21
       - run: npm ci
-      - name: Recogniser model (not stored in the repository)
-        run: node tools/fetch-model.mjs
       - run: npm run build
       - name: Create the Android project
         run: |
           npx cap add android
           npx cap sync android
-      - name: Configure camera, version and persistent APK signing
+      - name: Configure version and signing
         id: android-config
         env:
+          VERSION_CODE: ${{ github.run_number }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: node tools/configure-android.mjs
-      - name: Build update-safe signed APK
+      - name: Build signed release APK
         if: steps.android-config.outputs.signed == 'true'
         working-directory: android
         env:
@@ -54,50 +54,31 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon --console=plain
-      - name: Build debug APK while release signing is not configured
+      - name: Build debug APK (no signing secrets configured)
         if: steps.android-config.outputs.signed != 'true'
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon --console=plain
-      - name: Collect release-signed APK
-        if: steps.android-config.outputs.signed == 'true'
-        run: cp android/app/build/outputs/apk/release/app-release.apk pocherk.apk && ls -la pocherk.apk
-      - name: Collect debug APK (not suitable for update installs)
-        if: steps.android-config.outputs.signed != 'true'
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk pocherk.apk && ls -la pocherk.apk
+      - name: Collect APK
+        run: |
+          if [ "${{ steps.android-config.outputs.signed }}" = "true" ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk pocherk.apk
+          else
+            cp android/app/build/outputs/apk/debug/app-debug.apk pocherk.apk
+          fi
+          ls -la pocherk.apk
       - uses: actions/upload-artifact@v4
         with:
           name: pocherk-apk-${{ steps.android-config.outputs.signed == 'true' && 'signed' || 'debug' }}
           path: pocherk.apk
-      - name: Publish versioned APK release or latest main pre-release
+      - name: Publish APK release
         if: ${{ steps.android-config.outputs.signed == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'apk-latest' }}
-          name: "${{ startsWith(github.ref, 'refs/tags/v') && format('Почерк для Android {0}', github.ref_name) || 'Почерк для Android: последняя сборка' }}"
+          name: "${{ startsWith(github.ref, 'refs/tags/v') && format('Почерк — буквы {0}', github.ref_name) || 'Почерк — буквы: последняя сборка' }}"
           prerelease: true
           make_latest: false
           files: pocherk.apk
           body: |
             Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
-            APK подписан постоянным ключом проекта; обновление поверх предыдущей release-версии сохраняет локальную библиотеку.
-            Скачайте `pocherk.apk` на телефон и откройте его; Android попросит разрешить установку из этого источника.
-      - name: Publish tagged APK as a debug-signed pre-release when no persistent key exists
-        if: ${{ steps.android-config.outputs.signed != 'true' && startsWith(github.ref, 'refs/tags/v') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "${{ format('Почерк для Android {0} (debug-подпись)', github.ref_name) }}"
-          prerelease: true
-          make_latest: false
-          files: pocherk.apk
-          body: |
-            Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
-            APK собран и подписан временным debug-ключом GitHub Actions, потому что постоянный ключ проекта не настроен.
-            Это пригодная для первой установки сборка, но она НЕ обновляется поверх APK с другим сертификатом и не гарантирует сохранение данных при переустановке.
-            Для update-safe APK настройте ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS и ANDROID_KEY_PASSWORD и повторно запустите workflow.
-      - name: Explain why the public latest release was not replaced
-        if: steps.android-config.outputs.signed != 'true'
-        run: echo 'APK built as a CI debug artifact; only a version tag publishes a debug-signed release. Configure the four ANDROID_* signing secrets for update-safe releases.'
-      - name: Keep signed branch builds as artifacts until merged or tagged
-        if: ${{ steps.android-config.outputs.signed == 'true' && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') }}
-        run: echo 'Signed APK artifact created, but only main and version tags publish releases.'
+            Установите `pocherk.apk` на телефон; обновление поверх предыдущей release-версии сохраняет собранные глифы.

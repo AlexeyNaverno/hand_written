@@ -1,9 +1,6 @@
 node_modules/
 dist/
-local/
+android/
 *.log
 .DS_Store
-relay_out/
-android/
-public/models/*.onnx
-public/ort/
+local/

@@ -1,6 +1,6 @@
 {
-  "appId": "ru.pocherk.app",
-  "appName": "Почерк",
+  "appId": "ru.pocherk.handwritten",
+  "appName": "Почерк — буквы",
   "webDir": "dist",
   "android": {
     "allowMixedContent": false
