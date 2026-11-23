@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ALL_CHARS, GROUPS } from './core/charset';
+import { ALL_CHARS, GROUPS, fileStem } from './core/charset';
 import { batchSlots, buildQueue, fieldMm, mmToPx, slotId, type GlyphData, type Slot } from './core/glyph';
 import { clearAllData, emptyState, loadState, saveState, saveStateNow, type AppState, type Settings } from './core/store';
 import { buildZip, completeness } from './core/zip';
@@ -122,6 +122,20 @@ export function App() {
     });
   };
 
+  /** Экспорт одного глифа отдельным JSON — для проверки формата и функциональности. */
+  const onExportOne = async (slot: Slot) => {
+    const glyph = stateRef.current.glyphs[slotId(slot.char, slot.variant)];
+    if (!glyph) return;
+    const name = `${fileStem(slot.char, slot.variant)}.json`;
+    const bytes = new TextEncoder().encode(JSON.stringify(glyph, null, 2));
+    try {
+      const msg = await saveFile(name, bytes, 'application/json');
+      setStatus(msg);
+    } catch (err) {
+      setStatus(`Ошибка экспорта: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   const onExport = async () => {
     if (!done.complete || exporting) return;
     setExporting(true);
@@ -187,6 +201,11 @@ export function App() {
                     <b>{slot.char}</b> · вар. {slot.variant}
                   </span>
                   <span className="cell-buttons">
+                    {glyph && (
+                      <button title="Скачать JSON этой буквы" onClick={() => void onExportOne(slot)}>
+                        ⬇
+                      </button>
+                    )}
                     {glyph && (
                       <button title="Точки входа/выхода" onClick={() => setEditorSlot(slot)}>
                         ✎
