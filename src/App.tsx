@@ -53,7 +53,8 @@ export function App() {
   const batchSize = state.settings.cols * state.settings.rows;
   const cursor = Math.max(0, Math.min(state.cursor, Math.max(0, queue.length - 1)));
   const slots = batchSlots(queue, cursor, batchSize);
-  const displayPx = mmToPx(fieldMm(state.settings.cellMm, state.settings.fieldCells));
+  // холст всегда квадратный: одинаковый округлённый размер по обеим сторонам
+  const displayPx = Math.max(1, Math.round(mmToPx(fieldMm(state.settings.cellMm, state.settings.fieldCells))));
   const isLastScreen = cursor + batchSize >= queue.length;
   const firstSlot = slots[0];
   const lastSlot = slots[slots.length - 1];
@@ -211,32 +212,17 @@ export function App() {
         </p>
         <div
           className="grid"
-          style={{ gridTemplateColumns: `repeat(${state.settings.cols}, ${displayPx}px)` }}
+          style={{ gridTemplateColumns: `repeat(${state.settings.cols}, ${displayPx + 14}px)` }}
         >
           {slots.map((slot) => {
             const glyph = state.glyphs[slotId(slot.char, slot.variant)] ?? null;
+            const hasGlyph = glyph !== null;
             return (
-              <div key={slot.index} className={glyph ? 'cell filled' : 'cell'}>
-                <div className="cell-head">
+              <div key={slot.index} className={hasGlyph ? 'cell filled' : 'cell'} style={{ width: displayPx + 14 }}>
+                <div className="cell-head" style={{ width: displayPx }}>
                   <span className="cell-label">
-                    <b>{slot.char}</b> · вар. {slot.variant}
-                  </span>
-                  <span className="cell-buttons">
-                    {glyph && (
-                      <button title="Скачать JSON этой буквы" onClick={() => void onExportOne(slot)}>
-                        ⬇
-                      </button>
-                    )}
-                    {glyph && (
-                      <button title="Точки входа/выхода" onClick={() => setEditorSlot(slot)}>
-                        ✎
-                      </button>
-                    )}
-                    {glyph && (
-                      <button title="Очистить клетку" onClick={() => onClear(slot)}>
-                        ✕
-                      </button>
-                    )}
+                    <b>{slot.char}</b>
+                    {state.settings.variants > 1 && <span className="variant-badge">{slot.variant}</span>}
                   </span>
                 </div>
                 <CellCanvas
@@ -249,6 +235,17 @@ export function App() {
                   onStroke={(g) => onStroke(slot, g)}
                   onTooShort={() => setStatus('Слишком короткий штрих — нарисуйте букву одним движением')}
                 />
+                <div className="cell-actions" style={{ width: displayPx }}>
+                  <button disabled={!hasGlyph} title="Скачать JSON этой буквы" onClick={() => void onExportOne(slot)}>
+                    ⬇
+                  </button>
+                  <button disabled={!hasGlyph} title="Точки входа/выхода" onClick={() => setEditorSlot(slot)}>
+                    ✎
+                  </button>
+                  <button disabled={!hasGlyph} title="Очистить клетку" onClick={() => onClear(slot)}>
+                    ✕
+                  </button>
+                </div>
               </div>
             );
           })}

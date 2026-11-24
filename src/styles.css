@@ -144,12 +144,14 @@ button.big {
 .cell {
   background: var(--panel-bg);
   border: 1px solid #444;
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: 8px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: fit-content;
+  align-items: center;
+  gap: 5px;
+  /* ширина задаётся из App: холст + поля, чтобы все карточки были одинаковые */
+  box-sizing: border-box;
 }
 
 .cell.filled {
@@ -159,31 +161,59 @@ button.big {
 .cell-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 30px;
+  justify-content: center;
+  height: 22px;
+  flex: none;
 }
 
 .cell-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 14px;
+  line-height: 1;
 }
 
 .cell-label b {
   font-size: 18px;
 }
 
-.cell-buttons {
-  display: flex;
-  gap: 4px;
+.variant-badge {
+  font-size: 11px;
+  color: #9fb3d1;
+  background: #303845;
+  border-radius: 6px;
+  padding: 2px 5px;
+  line-height: 1;
 }
 
-.cell-buttons button {
-  padding: 4px 9px;
+.cell-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  height: 26px;
+}
+
+.cell-actions button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  height: 26px;
   font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cell-actions button:disabled {
+  opacity: 0.32;
+  cursor: default;
 }
 
 .cell-canvas {
   display: block;
+  flex: none;
   background: #fff;
   border-radius: 4px;
   cursor: crosshair;

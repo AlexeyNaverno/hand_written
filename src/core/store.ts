@@ -3,7 +3,7 @@
  * Пишется в IndexedDB (localStorage на сотни глифов не хватит),
  * сохранение происходит после каждого штриха, очистки и нажатия «Следующий».
  */
-import { autoDetectAnchors, METRICS, type GlyphData } from './glyph';
+import { ANCHOR_OFFSET, autoDetectAnchors, METRICS, type GlyphData } from './glyph';
 import { DEFAULT_SHEET, type SheetSettings } from './sheet';
 
 export interface Settings {
@@ -95,9 +95,16 @@ function migrateGlyph(g: GlyphData): GlyphData {
   if (path.length >= 4) {
     const near = (a: { x: number; y: number }, b: { x: number; y: number }) =>
       Math.abs(a.x - b.x) < 0.6 && Math.abs(a.y - b.y) < 0.6;
-    const legacy = near(next.anchors.entry.main, path[0]) && near(next.anchors.exit.main, path[path.length - 1]);
-    if (legacy) {
-      const detected = autoDetectAnchors(path);
+    const nearStart = near(next.anchors.entry.main, path[0]) && near(next.anchors.exit.main, path[path.length - 1]);
+    // авто-точки по краям штриха (старая система для всех символов)
+    // или вынесенные за крайние точки (система для латиницы и знаков)
+    const minX = Math.min(...path.map((p) => p.x));
+    const maxX = Math.max(...path.map((p) => p.x));
+    const nearEdge =
+      Math.abs(next.anchors.entry.main.x - Math.max(0, minX - ANCHOR_OFFSET)) < 0.6 &&
+      Math.abs(next.anchors.exit.main.x - Math.min(600, maxX + ANCHOR_OFFSET)) < 0.6;
+    if (nearStart || nearEdge) {
+      const detected = autoDetectAnchors(path, next.char);
       if (detected) next = { ...next, anchors: detected };
     }
   }

@@ -74,12 +74,29 @@ export function smoothPoints(pts: Point[]): Point[] {
 }
 
 /**
- * Автоматические точки входа/выхода: main — чуть левее самой левой и чуть
- * правее самой правой точки штриха, на их высоте; handle — ещё на столько же
- * наружу, поэтому соединительная кривая выходит и входит горизонтально.
+ * Автоматические точки входа/выхода.
+ *
+ * Русские буквы пишутся слитно, поэтому для них работает прежняя система:
+ * вход — начало штриха, выход — конец, handle — на 15% и 85% пути. Соединительная
+ * кривая продолжает сам штрих.
+ *
+ * Английские буквы, цифры и знаки пишутся раздельно: их точки — только
+ * разграничители, поэтому main выносится чуть левее/правее крайних точек
+ * штриха (на 4% холста), а handle — ещё на столько же наружу. Буквы при этом
+ * остаются рядом, потому что шаг строки считается по ширине самого штриха.
  */
-export function autoDetectAnchors(path: Point[]): Anchors | null {
+export function autoDetectAnchors(path: Point[], char = ''): Anchors | null {
   if (path.length < 4) return null;
+
+  if (/[а-яё]/i.test(char)) {
+    const entryHandleIdx = Math.min(Math.floor(path.length * 0.15), path.length - 1);
+    const exitHandleIdx = Math.max(Math.floor(path.length * 0.85), 0);
+    return {
+      entry: { main: { ...path[0] }, handle: { ...path[entryHandleIdx] } },
+      exit: { main: { ...path[path.length - 1] }, handle: { ...path[exitHandleIdx] } },
+    };
+  }
+
   let left = path[0];
   let right = path[0];
   for (const p of path) {
@@ -118,7 +135,7 @@ export function resample(path: Point[], max: number): Point[] {
 export function strokeToGlyph(char: string, raw: Point[]): GlyphData | null {
   if (raw.length < MIN_RAW_POINTS) return null;
   const path = resample(smoothPoints(raw), MAX_PATH_POINTS).map((p) => ({ x: round1(p.x), y: round1(p.y) }));
-  const anchors = autoDetectAnchors(path);
+  const anchors = autoDetectAnchors(path, char);
   if (!anchors) return null;
   const r = (p: Point) => ({ x: round1(p.x), y: round1(p.y) });
   return {

@@ -62,9 +62,21 @@ describe('glyph processing (same principles as the HTML editor)', () => {
     expect(METRICS.baselineY - METRICS.topLineY).toBe(600 / 3);
   });
 
-  it('autoDetectAnchors: точки чуть левее/правее крайних точек штриха', () => {
+  it('русские буквы: старая система — вход в начале, выход в конце штриха', () => {
     const path = line(101).map((p) => ({ x: p.x + 200, y: p.y }));
-    const a = autoDetectAnchors(path)!;
+    const a = autoDetectAnchors(path, 'а')!;
+    expect(a.entry.main).toEqual(path[0]);
+    expect(a.entry.handle).toEqual(path[15]);
+    expect(a.exit.main).toEqual(path[100]);
+    expect(a.exit.handle).toEqual(path[85]);
+    const upper = autoDetectAnchors(path, 'Б')!;
+    expect(upper.entry.main).toEqual(path[0]);
+    expect(upper.exit.main).toEqual(path[100]);
+  });
+
+  it('латиница и знаки: точки чуть левее/правее крайних точек штриха', () => {
+    const path = line(101).map((p) => ({ x: p.x + 200, y: p.y }));
+    const a = autoDetectAnchors(path, 'a')!;
     expect(a.entry.main.x).toBeCloseTo(200 - ANCHOR_OFFSET, 5);
     expect(a.entry.handle.x).toBeCloseTo(200 - ANCHOR_OFFSET * 2, 5);
     expect(a.entry.main.y).toBe(path[0].y);
@@ -75,11 +87,11 @@ describe('glyph processing (same principles as the HTML editor)', () => {
 
   it('auto-точки не выходят за холст у краёв', () => {
     const path = line(20);
-    const a = autoDetectAnchors(path)!;
+    const a = autoDetectAnchors(path, '.')!;
     expect(a.entry.main.x).toBeGreaterThanOrEqual(0);
     expect(a.entry.handle.x).toBeGreaterThanOrEqual(0);
     const right = line(20).map((p) => ({ x: p.x + 580, y: p.y }));
-    const b = autoDetectAnchors(right)!;
+    const b = autoDetectAnchors(right, 'Z')!;
     expect(b.exit.main.x).toBeLessThanOrEqual(600);
     expect(b.exit.handle.x).toBeLessThanOrEqual(600);
   });
@@ -90,10 +102,13 @@ describe('glyph processing (same principles as the HTML editor)', () => {
     expect(g.char).toBe('б');
     expect(g.metrics).toEqual({ topLineY: 200, baselineY: 400, canvasWidth: 600, canvasHeight: 600 });
     expect(g.path.length).toBe(50);
-    const minX = Math.min(...g.path.map((p) => p.x));
-    const maxX = Math.max(...g.path.map((p) => p.x));
-    expect(g.anchors.entry.main.x).toBeCloseTo(Math.max(0, minX - ANCHOR_OFFSET), 5);
-    expect(g.anchors.exit.main.x).toBeCloseTo(Math.min(600, maxX + ANCHOR_OFFSET), 5);
+    // кириллица — точки в концах штриха
+    expect(g.anchors.entry.main).toEqual(g.path[0]);
+    expect(g.anchors.exit.main).toEqual(g.path[49]);
+    // латиница — точки вынесены за крайние точки
+    const latin = strokeToGlyph('b', line(50).map((p) => ({ x: p.x + 100, y: p.y })))!;
+    expect(latin.anchors.entry.main.x).toBeCloseTo(100 - ANCHOR_OFFSET, 5);
+    expect(latin.anchors.exit.main.x).toBeCloseTo(latin.path[49].x + ANCHOR_OFFSET, 5);
     // JSON round-trip keeps the exact shape of the HTML export
     const parsed = JSON.parse(JSON.stringify(g));
     expect(Object.keys(parsed).sort()).toEqual(['anchors', 'char', 'metrics', 'path']);

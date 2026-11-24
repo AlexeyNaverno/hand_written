@@ -1,8 +1,9 @@
 name: android
 
-# Собирает Android-приложение (Capacitor). Без секретов подписи — debug APK
-# артефактом Actions; с секретами ANDROID_* — подписанный release APK
-# и публикация в Releases (см. README, раздел «Подпись Android»).
+# Собирает Android-приложение (Capacitor) и подписывает его постоянным ключом:
+# общий ключ проекта android-signing/pocherk.p12 либо личный keystore из
+# секретов ANDROID_* (см. README, раздел «Подпись Android»).
+# Одинаковая подпись у всех версий => APK ставится обновлением поверх старой.
 on:
   push:
     branches: [main, 'arena/**']
@@ -68,7 +69,7 @@ jobs:
           ls -la pocherk.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: pocherk-apk-${{ steps.android-config.outputs.signed == 'true' && 'signed' || 'debug' }}
+          name: pocherk-apk-${{ steps.android-config.outputs.signing }}
           path: pocherk.apk
       - name: Publish APK release
         if: ${{ steps.android-config.outputs.signed == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
@@ -81,8 +82,8 @@ jobs:
           files: pocherk.apk
           body: |
             Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
-            Установите `pocherk.apk` на телефон; обновление поверх предыдущей release-версии сохраняет собранные глифы.
-      - name: Publish tagged APK as a debug-signed pre-release when no persistent key exists
+            Подпись: ${{ steps.android-config.outputs.signing == 'common' && 'общий ключ проекта — APK ставится обновлением поверх предыдущих версий' || 'личный keystore из секретов' }}.
+      - name: Publish tagged APK if signing key is missing
         if: ${{ steps.android-config.outputs.signed != 'true' && startsWith(github.ref, 'refs/tags/v') }}
         uses: softprops/action-gh-release@v2
         with:
@@ -93,6 +94,6 @@ jobs:
           files: pocherk.apk
           body: |
             Версия ${{ steps.android-config.outputs.versionName }} (versionCode ${{ steps.android-config.outputs.versionCode }}), коммит ${{ github.sha }}.
-            APK собран и подписан временным debug-ключом GitHub Actions, потому что постоянный ключ проекта не настроен.
-            Это пригодная для установки сборка, но она НЕ обновляется поверх APK с другим сертификатом и не гарантирует сохранение данных при переустановке.
-            Для update-safe релизов настройте секреты ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS и ANDROID_KEY_PASSWORD (см. README) и перевыпустите тег.
+            Постоянный ключ не найден: APK подписан временным debug-ключом GitHub Actions.
+            Такая сборка НЕ обновляется поверх APK с другим сертификатом — потребуется переустановка с потерей данных.
+            Проверьте наличие android-signing/pocherk.p12 или секретов ANDROID_* (см. README).
