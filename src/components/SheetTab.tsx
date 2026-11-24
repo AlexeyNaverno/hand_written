@@ -109,7 +109,8 @@ export function SheetTab({ glyphs, sheet, onChange }: Props) {
     const res = layoutPages(tokens, library, sheet);
     setPages(res.pages);
     setMissing(res.missing);
-    setPageIndex(0);
+    // держим текущую страницу, если она ещё существует (правки текста не сбрасывают просмотр)
+    setPageIndex((i) => Math.max(0, Math.min(i, res.pages.length - 1)));
     setStatus(
       `Разложено: ${res.pages.length} стр.` +
         (res.missing.length ? ` · нет глифов для: ${res.missing.join(' ')}` : ' · все символы найдены'),
