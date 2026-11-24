@@ -8,8 +8,11 @@ import { CellCanvas } from './components/CellCanvas';
 import { AnchorEditor } from './components/AnchorEditor';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ProgressPanel } from './components/ProgressPanel';
+import { SheetTab } from './components/SheetTab';
+import type { SheetSettings } from './core/sheet';
 
 type View = 'write' | 'settings' | 'progress';
+type Tab = 'write' | 'sheet';
 
 const groupOf = (ch: string) => {
   const g = GROUPS.find((gr) => gr.chars.includes(ch));
@@ -20,6 +23,7 @@ export function App() {
   const [state, setState] = useState<AppState>(() => emptyState());
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState<View>('write');
+  const [tab, setTab] = useState<Tab>('write');
   const [editorSlot, setEditorSlot] = useState<Slot | null>(null);
   const [status, setStatus] = useState('Нарисуйте букву одним штрихом в клетке');
   const [exporting, setExporting] = useState(false);
@@ -108,6 +112,11 @@ export function App() {
     setStatus('Переход к выбранному символу. Нарисованное можно перерисовать.');
   };
 
+  const onSheet = (sheet: SheetSettings) => {
+    const s = stateRef.current;
+    commit({ ...s, sheet });
+  };
+
   const onSettings = (settings: Settings) => {
     const s = stateRef.current;
     commit({ ...s, settings, cursor: Math.min(s.cursor, Math.max(0, queue.length - 1)) });
@@ -116,7 +125,7 @@ export function App() {
   const onResetAll = () => {
     void clearAllData().then(() => {
       const s = stateRef.current;
-      commit({ ...emptyState(), settings: s.settings });
+      commit({ ...emptyState(), settings: s.settings, sheet: s.sheet });
       setView('write');
       setStatus('Все данные очищены. Начинаем сначала.');
     });
@@ -164,6 +173,14 @@ export function App() {
             {done.complete ? ' · всё готово!' : ''}
           </span>
         </div>
+        <nav className="tabs">
+          <button className={tab === 'write' ? 'tab active' : 'tab'} onClick={() => setTab('write')}>
+            Прописи
+          </button>
+          <button className={tab === 'sheet' ? 'tab active' : 'tab'} onClick={() => setTab('sheet')}>
+            Лист
+          </button>
+        </nav>
         <div className="topbar-actions">
           <button onClick={() => setView('progress')}>Обзор</button>
           <button onClick={() => setView('settings')}>⚙</button>
@@ -178,10 +195,14 @@ export function App() {
         </div>
       </header>
 
-      <div className="progress-bar slim">
+      {tab === 'write' && <div className="progress-bar slim">
         <div style={{ width: `${done.total ? (done.filled / done.total) * 100 : 0}%` }} />
-      </div>
+      </div>}
 
+      {tab === 'sheet' ? (
+        <SheetTab glyphs={state.glyphs} sheet={state.sheet} onChange={onSheet} />
+      ) : (
+        <>
       <main className="workspace">
         <p className="screen-info">
           {firstSlot && lastSlot
@@ -244,6 +265,8 @@ export function App() {
         </button>
         <span className="status">{status}</span>
       </footer>
+        </>
+      )}
 
       {view === 'settings' && (
         <SettingsPanel settings={state.settings} onChange={onSettings} onResetAll={onResetAll} onClose={() => setView('write')} />

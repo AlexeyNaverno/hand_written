@@ -82,9 +82,9 @@ export function SettingsPanel({ settings, onChange, onResetAll, onClose }: Props
           onChange={(v) => set({ strokeWidth: v })}
         />
         <Row
-          label="Вариантов каждого символа"
-          value={`${settings.variants} (минимум 4)`}
-          min={4}
+          label="Вариантов каждого символа (от 1 до 8)"
+          value={`${settings.variants}`}
+          min={1}
           max={8}
           step={1}
           valueNum={settings.variants}

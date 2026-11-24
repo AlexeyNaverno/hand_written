@@ -4,6 +4,7 @@
  * сохранение происходит после каждого штриха, очистки и нажатия «Следующий».
  */
 import type { GlyphData } from './glyph';
+import { DEFAULT_SHEET, type SheetSettings } from './sheet';
 
 export interface Settings {
   /** Размер клетки в миллиметрах (реальный масштаб), минимум 5. */
@@ -18,7 +19,7 @@ export interface Settings {
   strokeWidth: number;
   /** Показывать направляющие (сетку, верхнюю и базовую линии). */
   showGuides: boolean;
-  /** Сколько вариантов каждого символа требуется (минимум 4). */
+  /** Сколько вариантов каждого символа требуется (от 1 до 8). */
   variants: number;
 }
 
@@ -37,9 +38,16 @@ export interface AppState {
   /** Индекс первого слота текущего экрана в очереди. */
   cursor: number;
   settings: Settings;
+  /** Настройки вкладки «Лист» (генерация рукописного текста). */
+  sheet: SheetSettings;
 }
 
-export const emptyState = (): AppState => ({ glyphs: {}, cursor: 0, settings: { ...DEFAULT_SETTINGS } });
+export const emptyState = (): AppState => ({
+  glyphs: {},
+  cursor: 0,
+  settings: { ...DEFAULT_SETTINGS },
+  sheet: { ...DEFAULT_SHEET },
+});
 
 const DB_NAME = 'pocherk-glyphs';
 const STORE = 'kv';
@@ -69,6 +77,7 @@ export async function loadState(): Promise<AppState> {
         glyphs: s.glyphs ?? {},
         cursor: typeof s.cursor === 'number' ? s.cursor : 0,
         settings: { ...DEFAULT_SETTINGS, ...(s.settings ?? {}) },
+        sheet: { ...DEFAULT_SHEET, ...(s.sheet ?? {}) },
       };
     }
   } catch {
