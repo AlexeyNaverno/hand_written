@@ -36,6 +36,8 @@ export function CellCanvas({ char, glyph, displayPx, fieldCells, strokeWidth, sh
       path,
       anchors: drawingRef.current ? null : (glyphRef.current?.anchors ?? null),
       selectedAnchor: null,
+      // на главном экране — только сетка, буква и 4 точки
+      mode: 'cells',
     });
   };
 

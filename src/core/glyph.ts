@@ -3,7 +3,7 @@
  *
  * {
  *   "char": "б",
- *   "metrics": { "topLineY": 120, "baselineY": 420, "canvasWidth": 600, "canvasHeight": 600 },
+ *   "metrics": { "topLineY": 200, "baselineY": 400, "canvasWidth": 600, "canvasHeight": 600 },
  *   "path": [ { "x": 10.5, "y": 20.1 }, ... ],
  *   "anchors": {
  *     "entry": { "main": {...}, "handle": {...} },
@@ -36,13 +36,20 @@ export interface GlyphData {
 export const CANVAS_W = 600;
 export const CANVAS_H = 600;
 
-/** Направляющие как в HTML-редакторе: верхняя линия 20% высоты, базовая 70%. */
+/**
+ * Уровни поля 3×3: верхняя линия — верх центральной клетки (1/3 высоты),
+ * базовая — низ центральной клетки (2/3). Строчная буква вписывается
+ * в центральную клетку, выносные элементы уходят в верхнюю и нижнюю.
+ */
 export const METRICS = {
-  topLineY: CANVAS_H * 0.2,
-  baselineY: CANVAS_H * 0.7,
+  topLineY: CANVAS_H / 3,
+  baselineY: (CANVAS_H * 2) / 3,
   canvasWidth: CANVAS_W,
   canvasHeight: CANVAS_H,
 };
+
+/** Насколько точки входа/выхода выносятся наружу от крайних точек штриха. */
+export const ANCHOR_OFFSET = CANVAS_W * 0.04;
 
 /** Штрих короче этого числа сырых точек отбрасывается (как в HTML: нужно > 5). */
 export const MIN_RAW_POINTS = 6;
@@ -67,17 +74,28 @@ export function smoothPoints(pts: Point[]): Point[] {
 }
 
 /**
- * Автоматическое определение точек входа/выхода — дословно как в HTML:
- * entry.main = первая точка, entry.handle = точка на 15% пути,
- * exit.main = последняя точка, exit.handle = точка на 85% пути.
+ * Автоматические точки входа/выхода: main — чуть левее самой левой и чуть
+ * правее самой правой точки штриха, на их высоте; handle — ещё на столько же
+ * наружу, поэтому соединительная кривая выходит и входит горизонтально.
  */
 export function autoDetectAnchors(path: Point[]): Anchors | null {
   if (path.length < 4) return null;
-  const entryHandleIdx = Math.min(Math.floor(path.length * 0.15), path.length - 1);
-  const exitHandleIdx = Math.max(Math.floor(path.length * 0.85), 0);
+  let left = path[0];
+  let right = path[0];
+  for (const p of path) {
+    if (p.x < left.x) left = p;
+    if (p.x > right.x) right = p;
+  }
+  const d = ANCHOR_OFFSET;
   return {
-    entry: { main: { ...path[0] }, handle: { ...path[entryHandleIdx] } },
-    exit: { main: { ...path[path.length - 1] }, handle: { ...path[exitHandleIdx] } },
+    entry: {
+      main: { x: Math.max(0, left.x - d), y: left.y },
+      handle: { x: Math.max(0, left.x - d * 2), y: left.y },
+    },
+    exit: {
+      main: { x: Math.min(CANVAS_W, right.x + d), y: right.y },
+      handle: { x: Math.min(CANVAS_W, right.x + d * 2), y: right.y },
+    },
   };
 }
 

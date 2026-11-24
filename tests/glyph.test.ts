@@ -9,6 +9,8 @@ import {
   smoothPoints,
   strokeToGlyph,
   autoDetectAnchors,
+  ANCHOR_OFFSET,
+  METRICS,
   type Point,
 } from '../src/core/glyph';
 import { buildZip, buildZipEntries, completeness } from '../src/core/zip';
@@ -54,23 +56,44 @@ describe('glyph processing (same principles as the HTML editor)', () => {
     expect(sm[5].x).toBeCloseTo((pts[4].x + pts[5].x + pts[6].x) / 3);
   });
 
-  it('autoDetectAnchors: entry at start/15%, exit at end/85%', () => {
-    const path = line(101);
+  it('уровни: верх и низ центральной клетки, строчная высота = 1/3 поля', () => {
+    expect(METRICS.topLineY).toBe(200);
+    expect(METRICS.baselineY).toBe(400);
+    expect(METRICS.baselineY - METRICS.topLineY).toBe(600 / 3);
+  });
+
+  it('autoDetectAnchors: точки чуть левее/правее крайних точек штриха', () => {
+    const path = line(101).map((p) => ({ x: p.x + 200, y: p.y }));
     const a = autoDetectAnchors(path)!;
-    expect(a.entry.main).toEqual(path[0]);
-    expect(a.entry.handle).toEqual(path[15]);
-    expect(a.exit.main).toEqual(path[100]);
-    expect(a.exit.handle).toEqual(path[85]);
+    expect(a.entry.main.x).toBeCloseTo(200 - ANCHOR_OFFSET, 5);
+    expect(a.entry.handle.x).toBeCloseTo(200 - ANCHOR_OFFSET * 2, 5);
+    expect(a.entry.main.y).toBe(path[0].y);
+    expect(a.exit.main.x).toBeCloseTo(path[100].x + ANCHOR_OFFSET, 5);
+    expect(a.exit.handle.x).toBeCloseTo(path[100].x + ANCHOR_OFFSET * 2, 5);
+    expect(a.exit.main.y).toBe(path[100].y);
+  });
+
+  it('auto-точки не выходят за холст у краёв', () => {
+    const path = line(20);
+    const a = autoDetectAnchors(path)!;
+    expect(a.entry.main.x).toBeGreaterThanOrEqual(0);
+    expect(a.entry.handle.x).toBeGreaterThanOrEqual(0);
+    const right = line(20).map((p) => ({ x: p.x + 580, y: p.y }));
+    const b = autoDetectAnchors(right)!;
+    expect(b.exit.main.x).toBeLessThanOrEqual(600);
+    expect(b.exit.handle.x).toBeLessThanOrEqual(600);
   });
 
   it('strokeToGlyph rejects too-short strokes and produces the HTML format', () => {
     expect(strokeToGlyph('б', line(5))).toBeNull();
     const g = strokeToGlyph('б', line(50))!;
     expect(g.char).toBe('б');
-    expect(g.metrics).toEqual({ topLineY: 120, baselineY: 420, canvasWidth: 600, canvasHeight: 600 });
+    expect(g.metrics).toEqual({ topLineY: 200, baselineY: 400, canvasWidth: 600, canvasHeight: 600 });
     expect(g.path.length).toBe(50);
-    expect(g.anchors.entry.main).toEqual(g.path[0]);
-    expect(g.anchors.exit.main).toEqual(g.path[g.path.length - 1]);
+    const minX = Math.min(...g.path.map((p) => p.x));
+    const maxX = Math.max(...g.path.map((p) => p.x));
+    expect(g.anchors.entry.main.x).toBeCloseTo(Math.max(0, minX - ANCHOR_OFFSET), 5);
+    expect(g.anchors.exit.main.x).toBeCloseTo(Math.min(600, maxX + ANCHOR_OFFSET), 5);
     // JSON round-trip keeps the exact shape of the HTML export
     const parsed = JSON.parse(JSON.stringify(g));
     expect(Object.keys(parsed).sort()).toEqual(['anchors', 'char', 'metrics', 'path']);

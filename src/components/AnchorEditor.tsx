@@ -46,6 +46,8 @@ export function AnchorEditor({ glyph, displayPx, fieldCells, strokeWidth, showGu
       path: glyph.path,
       anchors: anchorsRef.current,
       selectedAnchor: selectedRef.current,
+      // в редакторе видны все линии: сетка, уровни, поля и связи точек
+      mode: 'full',
     });
   };
 

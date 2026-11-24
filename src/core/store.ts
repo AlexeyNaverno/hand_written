@@ -3,7 +3,7 @@
  * Пишется в IndexedDB (localStorage на сотни глифов не хватит),
  * сохранение происходит после каждого штриха, очистки и нажатия «Следующий».
  */
-import type { GlyphData } from './glyph';
+import { autoDetectAnchors, METRICS, type GlyphData } from './glyph';
 import { DEFAULT_SHEET, type SheetSettings } from './sheet';
 
 export interface Settings {
@@ -17,7 +17,7 @@ export interface Settings {
   rows: number;
   /** Толщина штриха в экранных пикселях. */
   strokeWidth: number;
-  /** Показывать направляющие (сетку, верхнюю и базовую линии). */
+  /** Показывать сетку клеток. */
   showGuides: boolean;
   /** Сколько вариантов каждого символа требуется (от 1 до 8). */
   variants: number;
@@ -62,6 +62,48 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
+/**
+ * Глифы, нарисованные до перехода на уровни «верх/низ центральной клетки»:
+ * сдвигаем их на разницу базовых линий и перевыставляем авто-точки, если
+ * пользователь их не двигал руками.
+ */
+function migrateGlyph(g: GlyphData): GlyphData {
+  const oldBaseline = g.metrics?.baselineY ?? METRICS.baselineY;
+  const dy = METRICS.baselineY - oldBaseline;
+  let next = g;
+  if (dy !== 0) {
+    next = {
+      ...g,
+      metrics: { ...METRICS },
+      path: g.path.map((p) => ({ x: p.x, y: round1(p.y + dy) })),
+      anchors: {
+        entry: {
+          main: { x: g.anchors.entry.main.x, y: round1(g.anchors.entry.main.y + dy) },
+          handle: { x: g.anchors.entry.handle.x, y: round1(g.anchors.entry.handle.y + dy) },
+        },
+        exit: {
+          main: { x: g.anchors.exit.main.x, y: round1(g.anchors.exit.main.y + dy) },
+          handle: { x: g.anchors.exit.handle.x, y: round1(g.anchors.exit.handle.y + dy) },
+        },
+      },
+    };
+  }
+  // старые авто-точки стояли ровно в концах штриха — заменяем на новые
+  const path = next.path;
+  if (path.length >= 4) {
+    const near = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.abs(a.x - b.x) < 0.6 && Math.abs(a.y - b.y) < 0.6;
+    const legacy = near(next.anchors.entry.main, path[0]) && near(next.anchors.exit.main, path[path.length - 1]);
+    if (legacy) {
+      const detected = autoDetectAnchors(path);
+      if (detected) next = { ...next, anchors: detected };
+    }
+  }
+  return next;
+}
+
 export async function loadState(): Promise<AppState> {
   try {
     const db = await openDb();
@@ -73,8 +115,10 @@ export async function loadState(): Promise<AppState> {
     db.close();
     if (value && typeof value === 'object') {
       const s = value as Partial<AppState>;
+      const glyphs: Record<string, GlyphData> = {};
+      for (const [key, glyph] of Object.entries(s.glyphs ?? {})) glyphs[key] = migrateGlyph(glyph);
       return {
-        glyphs: s.glyphs ?? {},
+        glyphs,
         cursor: typeof s.cursor === 'number' ? s.cursor : 0,
         settings: { ...DEFAULT_SETTINGS, ...(s.settings ?? {}) },
         sheet: { ...DEFAULT_SHEET, ...(s.sheet ?? {}) },

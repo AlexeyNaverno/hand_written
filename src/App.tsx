@@ -25,7 +25,7 @@ export function App() {
   const [view, setView] = useState<View>('write');
   const [tab, setTab] = useState<Tab>('write');
   const [editorSlot, setEditorSlot] = useState<Slot | null>(null);
-  const [status, setStatus] = useState('Нарисуйте букву одним штрихом в клетке');
+  const [status, setStatus] = useState('Нарисуйте букву одним штрихом: низ буквы — на нижней линии центральной клетки');
   const [exporting, setExporting] = useState(false);
   const stateRef = useRef(state);
   stateRef.current = state;

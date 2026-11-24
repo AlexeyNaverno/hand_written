@@ -93,12 +93,13 @@ export function SettingsPanel({ settings, onChange, onResetAll, onClose }: Props
 
         <label className="setting-check">
           <input type="checkbox" checked={settings.showGuides} onChange={(e) => set({ showGuides: e.target.checked })} />
-          Показывать направляющие (сетку и линии)
+          Показывать сетку клеток
         </label>
 
         <p className="hint">
           Поле на экране: {Math.round(mmToPx(field))}×{Math.round(mmToPx(field))} px при реальном масштабе. Размер холста в данных всегда
-          600×600 — настройки не меняют сохранённые координаты.
+          600×600 — настройки не меняют сохранённые координаты. Строчная буква вписывается в центральную клетку: её низ — на нижней
+          линии, верх — на верхней.
         </p>
 
         <div className="overlay-actions">
