@@ -29,8 +29,13 @@ gradle = gradle.replace(/versionName\s+"[^"]*"/, `versionName "${pkg.version}"`)
 
 const applySigning = (block) => {
   if (gradle.includes('signingConfigs')) return false;
+  // 1) подпись вешается на buildTypes.release (именно на него, не на signingConfigs)
+  gradle = gradle.replace(
+    /buildTypes\s*\{([\s\S]*?)release\s*\{/,
+    (_m, head) => `buildTypes {${head}release {\n            signingConfig signingConfigs.release`,
+  );
+  // 2) сам блок signingConfigs добавляется перед buildTypes
   gradle = gradle.replace(/buildTypes\s*\{/, `signingConfigs {\n${block}\n    }\n    buildTypes {`);
-  gradle = gradle.replace(/(release\s*\{)/, `$1\n            signingConfig signingConfigs.release`);
   return true;
 };
 
